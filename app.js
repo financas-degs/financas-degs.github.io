@@ -406,8 +406,8 @@ function carryIn(m, y) {
   return { prev, start, before: false };
 }
 const C = () => calcM(S.m, S.y);
-// meses futuros: previsão = entradas previstas − todas as contas do mês (pagas ou não)
-function monthResult(r) { return isFuture(r.m, r.y) ? r.income - r.monthlyTotal : r.remaining; }
+// resultado do mês = entradas − o que foi marcado como pago (igual para meses passados, atual e futuros)
+function monthResult(r) { return r.remaining; }
 const isFuture = (m, y) => { const t = new Date(); return y * 12 + m > t.getFullYear() * 12 + t.getMonth(); };
 function catColor(name) { const c = D().categories.find(x => x.name === name); return safeColor(c && c.color, '#94a3b8'); }
 
@@ -734,12 +734,11 @@ function details(kind) {
       { const ci = carryIn(S.m, S.y);
         title = ci ? 'Saldo acumulado' : 'Saldo do mês';
         if (ci) items.push(L('Saldo anterior', `Sobra/falta acumulada até ${MONTHS[(S.m + 11) % 12].toLowerCase()}`, ci.prev, ci.prev < 0 ? 'neg' : 'pos'));
-        const fut = isFuture(S.m, S.y);
-        items.push(L(fut ? 'Entradas previstas' : 'Total de entradas', fut ? 'Renda fixa + entradas lançadas' : 'Soma do que entrou no mês', c.income, 'pos'), L(fut ? 'Contas previstas' : 'Total de saídas', fut ? 'Todas as contas e aportes do mês' : 'Pagamentos + investimentos do mês', -(fut ? c.monthlyTotal : c.expenses), 'neg'));
+        items.push(L('Total de entradas', 'Soma do que entrou no mês', c.income, 'pos'), L('Total de saídas', 'Só o que foi marcado como pago + investimentos', -c.expenses, 'neg'));
         total = (ci ? ci.prev : 0) + monthResult(c); }
       break;
     case 'compromisso':
-      title = 'Contas fixas do mês'; items = c.payables.filter(p => p.type === 'fixed').map(p => L(p.name, `Vence dia ${p.day}${p.isPaid ? ' · paga' : ''}`, p.amount)); total = c.fixedTotal; break;
+      title = 'Compromisso fixo (só contas fixas)'; items = c.payables.filter(p => p.type === 'fixed').map(p => L(p.name, `Vence dia ${p.day}${p.isPaid ? ' · paga' : ''}`, p.amount)); total = c.fixedTotal; break;
     case 'invest':
       title = 'Patrimônio acumulado';
       const end = new Date(S.y, S.m + 1, 0);
@@ -753,7 +752,7 @@ function details(kind) {
     case 'percent':
       title = '% da renda comprometida'; items = [L('Contas fixas do mês', '', c.fixedTotal), L('Total de entradas', '', c.income, 'pos')]; total = null; break;
     case 'monthlyTotal': {
-      title = 'Obrigações do mês';
+      title = 'Compromisso mensal (tudo que vence no mês)';
       const by = t => c.payables.filter(p => p.type === t).reduce((s, x) => s + x.amount, 0);
       [['Contas fixas', 'fixed'], ['Faturas de cartão', 'card_invoice'], ['Gastos variáveis', 'variable'], ['Parcelas de dívidas', 'debt_installment']].forEach(([l, t]) => { const v = by(t); if (v) items.push(L(l, '', v)); });
       if (c.investTotal) items.push(L('Investimentos', 'Aportes do mês', c.investTotal));
@@ -833,9 +832,9 @@ function viewInicio() {
   const pct = Math.min(100, c.income > 0 ? (c.expenses / c.income) * 100 : 0);
   if (vis('restante') || vis('entradas') || vis('saidas')) {
     const ci = carryIn(S.m, S.y), res = monthResult(c), final = (ci ? ci.prev : 0) + res;
-    h += `<div class="hero" style="margin-top:${hasAnyData() ? 0 : 16}px"><div class="hero-label">${ci ? 'Saldo acumulado' : 'Saldo de ' + MONTHS[S.m].toLowerCase()}${ci && isFuture(S.m, S.y) ? ' · previsão' : ''}</div>
+    h += `<div class="hero" style="margin-top:${hasAnyData() ? 0 : 16}px"><div class="hero-label">${ci ? 'Saldo acumulado' : 'Saldo de ' + MONTHS[S.m].toLowerCase()}</div>
       <div class="hero-value num" data-detail="restante" style="margin-bottom:${ci ? 4 : 16}px">${fmt(final)}</div>
-      ${ci ? `<div class="hero-carry" data-detail="restante">Veio do mês anterior <b class="num">${fmt(ci.prev)}</b> <span>·</span> ${isFuture(S.m, S.y) ? 'Previsão de' : 'Resultado de'} ${MONTHS[S.m].toLowerCase()} <b class="num">${res >= 0 ? '+' : ''}${fmt(res)}</b></div>` : ''}
+      ${ci ? `<div class="hero-carry" data-detail="restante">Veio do mês anterior <b class="num">${fmt(ci.prev)}</b> <span>·</span> Resultado de ${MONTHS[S.m].toLowerCase()} <b class="num">${res >= 0 ? '+' : ''}${fmt(res)}</b></div>` : ''}
       <div class="hero-row">
         <button class="hero-mini" data-detail="entradas"><span>${ic('down')} Entradas</span><b class="num">${fmt(c.income)}</b></button>
         <button class="hero-mini" data-detail="saidas"><span>${ic('up')} Saídas</span><b class="num">${fmt(c.expenses)}</b></button>

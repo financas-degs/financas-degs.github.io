@@ -1,5 +1,5 @@
 // Service worker: deixa o app abrir rápido e funcionar offline.
-const CACHE = 'financas-v1.1.0';
+const CACHE = 'financas-v1.2.0';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './firebase-config.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png'];
 
 self.addEventListener('install', e => {

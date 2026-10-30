@@ -822,7 +822,7 @@ function viewInicio() {
   if (D().settings.isDemo) h += `<div class="banner demo">${ic('sparkle')}<div class="grow"><b>Você está vendo dados de exemplo.</b> Explore à vontade — quando quiser começar de verdade, remova o exemplo.</div><button class="btn sm" data-act="cleardemo">${ic('trash')} Remover exemplo</button></div>`;
   else if (S.mode === 'local' && !window.FIREBASE_CONFIG) h += `<div class="banner">${ic('info')}<div><b>Modo de demonstração.</b> Os dados ficam salvos só neste navegador. Quando conectarmos o Firebase, tudo passa a sincronizar entre computador e celular.</div></div>`;
   if (!hasAnyData()) {
-    h += `<div class="card welcome"><div><h2>Bem-vindo(a)! 👋</h2><p class="muted" style="margin:6px 0 0">Comece cadastrando o básico. Depois é só lançar os gastos do dia a dia.</p></div>
+    h += `<div class="card welcome"><div><h2>Bem-vindo(a)${firstName() ? ', ' + esc(firstName()) : ''}! 👋</h2><p class="muted" style="margin:6px 0 0">Comece cadastrando o básico. Depois é só lançar os gastos do dia a dia.</p></div>
       <div class="steps"><button class="step" data-act="new" data-key="fixedIncome"><span class="ico-c tone-green">${ic('down')}</span><b>1. Sua renda</b><span>Salário e entradas fixas</span></button>
       <button class="step" data-act="new" data-key="fixedCosts"><span class="ico-c tone-blue">${ic('repeat')}</span><b>2. Contas fixas</b><span>Aluguel, luz, internet…</span></button>
       <button class="step" data-act="new" data-key="cards"><span class="ico-c tone-violet">${ic('card')}</span><b>3. Cartões</b><span>Fechamento e vencimento</span></button></div>
@@ -1121,6 +1121,13 @@ async function clearDemo() {
   }
 }
 
+function firstName() {
+  const u = S.user; if (!u) return '';
+  const n = (u.displayName || '').trim().split(/\s+/)[0] || (u.email || '').split('@')[0].split(/[._-]/)[0];
+  return n ? n.charAt(0).toUpperCase() + n.slice(1) : '';
+}
+function greeting() { const h = new Date().getHours(); return h < 5 ? 'Boa noite' : h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; }
+
 // ---------- renderização ----------
 function navHTML() {
   return NAV.map(n => n.sep ? `<div class="nav-sep">${n.sep}</div>` : `<a href="#${n.v}" class="${S.view === n.v ? 'active' : ''}">${ic(n.i)}<span>${n.t}</span></a>`).join('');
@@ -1142,7 +1149,7 @@ function render() {
   const scrollY = window.scrollY, active = document.activeElement, qKey = active && active.dataset ? active.dataset.q : null, caret = qKey ? active.selectionStart : 0;
   $('#nav').innerHTML = navHTML();
   const monthly = !MONTHLESS.includes(S.view);
-  $('#topbar').innerHTML = `<h1>${esc(TITLES[S.view])}</h1><span class="spacer"></span>
+  $('#topbar').innerHTML = `<h1>${S.view === 'inicio' && firstName() ? `${greeting()}, ${esc(firstName())} 👋` : esc(TITLES[S.view])}</h1><span class="spacer"></span>
     ${monthly ? `<div class="month-picker"><button data-act="prev" aria-label="Mês anterior">${ic('chevL')}</button><button class="label" data-act="pickmonth" title="Escolher mês e ano">${MONTHS[S.m]} ${S.y}</button><button data-act="next" aria-label="Próximo mês">${ic('chevR')}</button></div>${S.m !== new Date().getMonth() || S.y !== new Date().getFullYear() ? `<button class="today-btn" data-act="today" title="Voltar para ${MONTHS[new Date().getMonth()]}">${ic('undo')}<span>Mês atual</span></button>` : ''}` : ''}
     <span class="sync ${S.sync}" title="Status da sincronização"><span class="dot"></span><span class="lbl">${syncLabel()}</span></span>
     <button class="btn primary fab-desktop" data-act="quick">${ic('plus')} Lançar</button>`;

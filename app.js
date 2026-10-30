@@ -1349,7 +1349,22 @@ async function offerLocalUpload() {
 let deferredInstall = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; if (S.view === 'ajustes') render(); });
 function registerSW() {
-  try { if ('serviceWorker' in navigator && location.protocol === 'https:' && window.self === window.top) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch {}
+  try {
+    if (!('serviceWorker' in navigator) || location.protocol !== 'https:' || window.self !== window.top) return;
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      // procura versão nova ao abrir e sempre que o app volta para a tela
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(() => {});
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      const doReload = async () => { if (S.mode === 'cloud') await Promise.race([Cloud.flush(), new Promise(r => setTimeout(r, 1500))]); location.reload(); };
+      if (sheetStack.length) toast('Nova versão do app disponível.', false, { label: 'Atualizar', fn: doReload });
+      else doReload();
+    });
+  } catch {}
 }
 
 // ---------- início ----------

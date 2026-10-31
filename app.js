@@ -30,6 +30,7 @@ const parts = s => String(s || '').split('-').map(Number);
 const inMonth = (s, m, y) => { if (!s) return false; const [yy, mm] = parts(s); return yy === y && mm - 1 === m; };
 const monthDiff = (s, m, y) => { const [sy, sm] = parts(s); return (y - sy) * 12 + (m - (sm - 1)); };
 const monthStr = (m, y) => `${y}-${pad(m + 1)}`;
+const isoDay = s => { if (!s) return ''; const t = new Date(s); return isNaN(t) ? '' : `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`; };
 const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
@@ -130,7 +131,7 @@ const S = {
   mode: 'local', user: null, ready: false, sync: 'local', ver: 0,
   ui: { contasFilter: 'pendentes', contasQ: '', homeQ: '', investAll: false, debtTab: 'pagar', quickType: 'gasto' }
 };
-const VIEWS = ['inicio','contas','entradas','fixas','gastos','cartoes','investimentos','dividas','negativados','prioridades','ajustes'];
+const VIEWS = ['simples','inicio','contas','entradas','fixas','gastos','cartoes','investimentos','dividas','negativados','prioridades','ajustes'];
 const NAV = [
   { v: 'inicio', t: 'Início', i: 'home' },
   { v: 'contas', t: 'Contas a pagar', i: 'receipt' },
@@ -148,6 +149,15 @@ const NAV = [
   { v: 'ajustes', t: 'Ajustes', i: 'sliders' }
 ];
 const D = () => S.data;
+// modo simplificado: só entradas e saídas, dia a dia (usa as mesmas listas do modo completo)
+const isSimple = () => !!(D().settings && D().settings.simple);
+const NAV_SIMPLE = [{ v: 'simples', t: 'Meu caixa', i: 'home' }, { sep: 'Conta' }, { v: 'ajustes', t: 'Ajustes', i: 'sliders' }];
+const SIMPLE_VIEWS = ['simples', 'ajustes'];
+const navList = () => isSimple() ? NAV_SIMPLE : NAV;
+function fixView() {
+  if (isSimple() && !SIMPLE_VIEWS.includes(S.view)) S.view = 'simples';
+  else if (!isSimple() && S.view === 'simples') S.view = 'inicio';
+}
 
 // ---------- persistência ----------
 const LOCAL_KEY = 'financas.app.v1';
@@ -325,13 +335,13 @@ function calc(m, y) {
   const investTotal = investMonth.reduce((s, x) => s + num(x.amount), 0);
 
   // Saídas = pagamentos marcados neste mês + aportes do mês
-  const outflows = investMonth.map(i => ({ desc: `Aporte: ${i.name || 'Investimento'}`, sub: 'Investimento', amount: num(i.amount), tone: 'blue' }));
+  const outflows = investMonth.map(i => ({ desc: `Aporte: ${i.name || 'Investimento'}`, sub: 'Investimento', amount: num(i.amount), tone: 'blue', date: i.date, edit: ['investments', i.id] }));
   d.payments.filter(p => p.month === m && p.year === y).forEach(p => {
     const tM = p.targetMonth ?? p.month, tY = p.targetYear ?? p.year;
-    let amount = 0, desc = '', sub = '';
-    if (p.type === 'fixed') { const c = d.fixedCosts.find(x => String(x.id) === String(p.originalId)); if (c) { amount = num(c.amount); desc = c.name; sub = `Venc. ${pad(c.dueDay || 1)}/${pad(tM + 1)}/${tY}`; } }
-    else if (p.type === 'variable') { const v = d.variableExpenses.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.amount); desc = v.description || v.category; sub = `Gasto · ${fmtDate(v.date)}`; } }
-    else if (p.type === 'debt_installment') { const v = d.debts.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.totalAmount) / (v.installments || 1); desc = v.name; sub = `Parcela · ${pad(tM + 1)}/${tY}`; } }
+    let amount = 0, desc = '', sub = '', date = isoDay(p.date), edit = null, simple = null;
+    if (p.type === 'fixed') { const c = d.fixedCosts.find(x => String(x.id) === String(p.originalId)); if (c) { amount = num(c.amount); desc = c.name; sub = `Venc. ${pad(c.dueDay || 1)}/${pad(tM + 1)}/${tY}`; edit = ['fixedCosts', c.id]; } }
+    else if (p.type === 'variable') { const v = d.variableExpenses.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.amount); desc = v.description || v.category; sub = `Gasto · ${fmtDate(v.date)}`; if (inMonth(v.date, m, y)) date = v.date; simple = ['variableExpenses', v.id]; } }
+    else if (p.type === 'debt_installment') { const v = d.debts.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.totalAmount) / (v.installments || 1); desc = v.name; sub = `Parcela · ${pad(tM + 1)}/${tY}`; edit = ['debts', v.id]; } }
     else if (p.type === 'card_invoice') {
       const ps = String(p.originalId).split('_');
       let iY = tY, iM = tM, cId = '';
@@ -340,9 +350,9 @@ function calc(m, y) {
       amount = d.cardExpenses.filter(e => String(e.cardId) === cId && inMonth(e.date, iM, iY)).reduce((s, x) => s + num(x.amount), 0);
       desc = `Fatura ${card ? card.name : 'Cartão'}`; sub = `Venc. ${pad(card ? card.dueDay : 10)}/${pad(iM + 1)}/${iY}`;
     }
-    if (amount > 0) outflows.push({ desc, sub, amount, tone: p.type === 'debt_installment' ? 'red' : '', pay: p });
+    if (amount > 0) outflows.push({ desc, sub, amount, tone: p.type === 'debt_installment' ? 'red' : '', pay: p, date, edit, simple, kind: p.type });
   });
-  d.negatives.filter(n => n.paid && inMonth(n.paidDate, m, y)).forEach(n => outflows.push({ desc: `Quitação: ${n.description || 'Negativado'}`, sub: `Negativado · ${fmtDate(n.paidDate)}`, amount: num(n.paidAmount ?? n.amount), tone: 'red' }));
+  d.negatives.filter(n => n.paid && inMonth(n.paidDate, m, y)).forEach(n => outflows.push({ desc: `Quitação: ${n.description || 'Negativado'}`, sub: `Negativado · ${fmtDate(n.paidDate)}`, amount: num(n.paidAmount ?? n.amount), tone: 'red', date: n.paidDate, edit: ['negatives', n.id] }));
   const expenses = outflows.reduce((s, x) => s + x.amount, 0);
 
   // Vencidos: contas fixas não pagas dos 12 meses anteriores
@@ -1032,14 +1042,15 @@ function viewAjustes() {
   return `<div class="grid" style="max-width:820px">
   ${D().settings.isDemo ? `<div class="banner demo" style="margin:0">${ic('sparkle')}<div class="grow"><b>Dados de exemplo ativos.</b></div><button class="btn sm" data-act="cleardemo">${ic('trash')} Remover exemplo</button></div>` : ''}
   <div class="card"><div class="card-head"><h3>Conta</h3></div><div class="card-body">${account}</div></div>
+  <div class="card"><div class="card-head"><div><h3>Modo de uso</h3><div class="sub">Os dois modos usam os mesmos dados — dá para trocar quando quiser</div></div></div><div class="card-body"><div class="set-row"><div class="grow"><b>${isSimple() ? 'Simples' : 'Completo'}</b><span>${isSimple() ? 'Só entradas e saídas, vendo dia a dia quanto entrou e quanto saiu.' : 'Contas fixas, cartões, investimentos, dívidas e muito mais.'}</span></div><div class="seg"><button data-act="mode" data-v="simple" class="${isSimple() ? 'on' : ''}">Simples</button><button data-act="mode" data-v="full" class="${isSimple() ? '' : 'on'}">Completo</button></div></div></div></div>
   <div class="card"><div class="card-head"><div><h3>Saldo acumulado</h3><div class="sub">A sobra (ou falta) de um mês passa para o próximo</div></div></div><div class="card-body">
     <div class="set-row"><div class="grow"><b>Levar o saldo para o mês seguinte</b><span>Se sobrar R$ 500 em outubro, novembro já começa com +R$ 500. Se faltar, começa negativo.</span></div><label class="switch" style="padding:7px 10px"><input type="checkbox" data-carry="enabled"${carryCfg().enabled ? ' checked' : ''}></label></div>
     ${carryCfg().enabled ? `<div class="set-row"><div class="grow"><b>Começar a contar em</b><span>${carryCfg().startMonth ? 'Escolhido por você' : `Automático: ${MONTHS[carryStart() % 12]} de ${Math.floor(carryStart() / 12)} (primeiro mês com lançamentos)`}</span></div><input type="month" class="input" style="width:auto;min-height:40px;padding:8px 10px" data-carry="startMonth" value="${esc(carryCfg().startMonth || monthStr(carryStart() % 12, Math.floor(carryStart() / 12)))}"></div>
     <div class="set-row"><div class="grow"><b>Saldo inicial</b><span>Quanto você tinha (ou devia) no começo desse mês. Pode ser negativo.</span></div><div class="money" style="width:170px"><span>R$</span><input class="input" style="padding-left:38px;min-height:40px" inputmode="decimal" data-carry="initial" value="${esc(moneyIn(carryCfg().initial))}" placeholder="0,00"></div></div>` : ''}
   </div></div>
   <div class="card"><div class="card-head"><h3>Aparência</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Tema</b><span>Claro, escuro ou igual ao do aparelho</span></div><div class="seg">${[['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Escuro']].map(([k, l]) => `<button data-theme-set="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('')}</div></div></div></div>
-  <div class="card"><div class="card-head"><div><h3>Painel inicial</h3><div class="sub">Escolha o que aparece na tela de início</div></div></div><div class="card-body"><div class="toggles">
-    ${Object.entries(CARD_LABELS).concat(Object.entries(WIDGET_LABELS)).map(([k, l]) => `<label class="switch"><span>${esc(l)}</span><input type="checkbox" data-vis="${k}"${vis(k) ? ' checked' : ''}></label>`).join('')}</div></div></div>
+  ${isSimple() ? '' : `<div class="card"><div class="card-head"><div><h3>Painel inicial</h3><div class="sub">Escolha o que aparece na tela de início</div></div></div><div class="card-body"><div class="toggles">
+    ${Object.entries(CARD_LABELS).concat(Object.entries(WIDGET_LABELS)).map(([k, l]) => `<label class="switch"><span>${esc(l)}</span><input type="checkbox" data-vis="${k}"${vis(k) ? ' checked' : ''}></label>`).join('')}</div></div></div>`}
   <div class="card"><div class="card-head"><h3>Categorias de gastos</h3><button class="btn sm" data-act="cats">${ic('tag')} Gerenciar</button></div><div class="card-body"><div style="display:flex;flex-wrap:wrap;gap:8px">${D().categories.map(c => `<span class="chip"><i class="dot-c" style="width:8px;height:8px;background:${safeColor(c.color)}"></i>${esc(c.name)}</span>`).join('')}</div></div></div>
   <div class="card"><div class="card-head"><h3>Backup</h3></div><div class="card-body">
     <div class="set-row"><span class="ico-c tone-primary">${ic('download')}</span><div class="grow"><b>Exportar backup</b><span>Baixa um arquivo .json com todos os seus dados</span></div><button class="btn" data-act="export">Exportar</button></div>
@@ -1047,10 +1058,148 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.0</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.6</p></div>`;
 }
-const VIEW_FN = { inicio: viewInicio, contas: viewContas, entradas: viewEntradas, fixas: viewFixas, gastos: viewGastos, cartoes: viewCartoes, investimentos: viewInvest, dividas: viewDividas, negativados: viewNegativados, prioridades: viewPrioridades, ajustes: viewAjustes };
-const TITLES = Object.fromEntries(NAV.filter(n => n.v).map(n => [n.v, n.t]));
+
+// ---------- modo simplificado ----------
+const WDAYS = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+function setMode(simple) {
+  if (isSimple() === simple) return;
+  D().settings.simple = simple;
+  S.view = simple ? 'simples' : 'inicio';
+  try { history.replaceState(null, '', '#' + S.view); } catch {}
+  commit(['settings']);
+  window.scrollTo(0, 0);
+  toast(simple ? 'Modo simples: só entradas e saídas' : 'Modo completo ativado');
+}
+// todas as movimentações reais do mês, com data (o que entrou e o que saiu)
+function simpleMoves(m, y) {
+  const c = calcM(m, y), last = new Date(y, m + 1, 0).getDate(), first = `${y}-${pad(m + 1)}-01`, list = [];
+  const inM = s => (s && inMonth(s, m, y) ? s : first);
+  c.fixedIncomeMonth.forEach(i => list.push({ dir: 'in', date: first, desc: i.description || 'Renda fixa', sub: 'Renda fixa · todo mês', amount: num(i.amount), edit: ['fixedIncome', i.id] }));
+  c.earningsMonth.forEach(i => list.push({ dir: 'in', date: i.date, desc: i.description || 'Entrada', amount: num(i.amount), simple: ['earnings', i.id] }));
+  c.receivables.filter(r => r.isPaid).forEach(r => list.push({ dir: 'in', date: `${y}-${pad(m + 1)}-${pad(Math.min(r.day, last))}`, desc: `${r.name} (${r.label})`, sub: 'Valor recebido', amount: r.amount }));
+  c.outflows.forEach(o => list.push({ dir: 'out', date: inM(o.date), desc: o.desc || 'Saída', sub: o.simple ? '' : o.sub, amount: o.amount, simple: o.simple, edit: o.edit }));
+  return list;
+}
+function dailyChart(moves, m, y) {
+  const n = new Date(y, m + 1, 0).getDate(), inn = Array(n + 1).fill(0), out = Array(n + 1).fill(0);
+  moves.forEach(x => { const d = parts(x.date)[2] || 1; (x.dir === 'in' ? inn : out)[d] += x.amount; });
+  const W = 440, H = 150, pl = 36, pb = 20, pt = 8, max = Math.max(1, ...inn, ...out) * 1.1;
+  const gw = (W - pl) / n, bw = Math.max(2, Math.min(7, gw / 2.6));
+  const yv = v => pt + (H - pt - pb) * (1 - v / max);
+  const grid = [0, .5, 1].map(f => { const v = max * f; return `<line x1="${pl}" x2="${W}" y1="${yv(v)}" y2="${yv(v)}" stroke="var(--border)" stroke-dasharray="3 4"/><text x="${pl - 6}" y="${yv(v) + 4}" text-anchor="end">${fmtShort(v)}</text>`; }).join('');
+  let bars = '';
+  for (let d = 1; d <= n; d++) {
+    const x = pl + gw * (d - 1) + gw / 2;
+    if (inn[d]) bars += `<rect x="${x - bw}" y="${yv(inn[d])}" width="${bw}" height="${Math.max(1, H - pb - yv(inn[d]))}" rx="2" fill="var(--green)"><title>Dia ${d}: entrou ${fmt(inn[d])}</title></rect>`;
+    if (out[d]) bars += `<rect x="${x}" y="${yv(out[d])}" width="${bw}" height="${Math.max(1, H - pb - yv(out[d]))}" rx="2" fill="var(--red)" opacity=".85"><title>Dia ${d}: saiu ${fmt(out[d])}</title></rect>`;
+    if (d === 1 || d % 5 === 0) bars += `<text x="${x}" y="${H - 5}" text-anchor="middle">${d}</text>`;
+  }
+  return `<svg class="chart-svg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${grid}${bars}</svg><div class="legend"><span><i style="background:var(--green)"></i>Entrou</span><span><i style="background:var(--red)"></i>Saiu</span></div>`;
+}
+function viewSimples() {
+  const c = C(), moves = simpleMoves(S.m, S.y);
+  const ci = carryIn(S.m, S.y), res = c.income - c.expenses, final = (ci ? ci.prev : 0) + res;
+  const t = new Date(), today = todayStr(), yd = (() => { const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
+  let h = '';
+  if (D().settings.isDemo) h += `<div class="banner demo">${ic('sparkle')}<div class="grow"><b>Você está vendo dados de exemplo.</b></div><button class="btn sm" data-act="cleardemo">${ic('trash')} Remover exemplo</button></div>`;
+  h += `<div class="hero"><div class="hero-label">${ci ? 'Saldo acumulado' : 'Saldo de ' + MONTHS[S.m].toLowerCase()}</div>
+    <div class="hero-value num" data-detail="restante" style="margin-bottom:${ci ? 4 : 16}px">${fmt(final)}</div>
+    ${ci ? `<div class="hero-carry" data-detail="restante">Veio do mês anterior <b class="num">${fmt(ci.prev)}</b> <span>·</span> Resultado de ${MONTHS[S.m].toLowerCase()} <b class="num">${res >= 0 ? '+' : ''}${fmt(res)}</b></div>` : ''}
+    <div class="hero-row" style="grid-template-columns:1fr 1fr">
+      <button class="hero-mini" data-detail="entradas"><span>${ic('down')} Entrou no mês</span><b class="num">${fmt(c.income)}</b></button>
+      <button class="hero-mini" data-detail="saidas"><span>${ic('up')} Saiu no mês</span><b class="num">${fmt(c.expenses)}</b></button>
+    </div></div>`;
+  h += `<div class="sbtns"><button class="sbig in" data-act="sadd" data-dir="in">${ic('plus')}<span>Entrada<small>Recebi</small></span></button><button class="sbig out" data-act="sadd" data-dir="out"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg><span>Saída<small>Gastei / paguei</small></span></button></div>`;
+  // dias
+  const byDay = {};
+  moves.forEach(x => { (byDay[x.date] = byDay[x.date] || []).push(x); });
+  const days = Object.keys(byDay).sort().reverse();
+  const chart = moves.length ? `<div class="card schart"><div class="card-head"><h3>Dia a dia</h3><span class="sub">${MONTHS[S.m]}</span></div><div class="card-body">${dailyChart(moves, S.m, S.y)}</div></div>` : '';
+  const dayCards = days.map(d => {
+    const items = byDay[d].sort((a, b) => (a.dir === b.dir ? 0 : a.dir === 'in' ? -1 : 1));
+    const tin = items.filter(x => x.dir === 'in').reduce((s, x) => s + x.amount, 0), tout = items.filter(x => x.dir === 'out').reduce((s, x) => s + x.amount, 0);
+    const [yy, mm, dd] = parts(d), wd = WDAYS[new Date(yy, mm - 1, dd).getDay()];
+    const label = d === today ? 'Hoje' : d === yd ? 'Ontem' : `${pad(dd)}/${pad(mm)}`;
+    const rows = items.map(x => {
+      const attr = x.simple ? ` data-sedit="${esc(x.simple[0])}|${esc(x.simple[1])}"` : x.edit ? ` data-edit="${esc(x.edit[0])}" data-id="${esc(x.edit[1])}"` : '';
+      return `<div class="row${attr ? ' click' : ''}"${attr}><span class="ico-c tone-${x.dir === 'in' ? 'green' : 'red'}">${ic(x.dir === 'in' ? 'down' : 'up')}</span><div class="grow"><div class="t">${esc(x.desc)}</div>${x.sub ? `<div class="s">${esc(x.sub)}</div>` : ''}</div><div class="amt num ${x.dir === 'in' ? 'pos' : 'neg'}">${x.dir === 'in' ? '+' : '−'} ${fmt(x.amount)}</div></div>`;
+    }).join('');
+    return `<div class="sday"><div class="sday-head"><div><b>${label}</b><span>${label.includes('/') ? wd : `${pad(dd)}/${pad(mm)} · ${wd}`}</span></div><div class="sday-tot">${tin ? `<span class="pos num">+ ${fmt(tin)}</span>` : ''}${tout ? `<span class="neg num">− ${fmt(tout)}</span>` : ''}</div></div><div class="list">${rows}</div></div>`;
+  }).join('');
+  h += `<div class="sgrid${chart ? '' : ' one'}"><div class="card"><div class="card-body" style="padding-top:6px">${dayCards || emptyBox('wallet', `Nada lançado em ${MONTHS[S.m].toLowerCase()} ainda.<br>Toque em <b>Entrada</b> quando receber algo e em <b>Saída</b> quando gastar.`)}</div></div>${chart}</div>`;
+  if (c.pendingTotal > 0 && c.payables.some(p => !p.isPaid && p.type !== 'variable')) h += `<p class="muted" style="font-size:12.5px;margin-top:12px">Você também tem ${fmt(c.pendingTotal)} em contas a pagar cadastradas no modo completo. Elas só entram aqui quando forem marcadas como pagas.</p>`;
+  return h;
+}
+function simpleForm(dir = 'in', id) {
+  const keyOf = d => (d === 'in' ? 'earnings' : 'variableExpenses');
+  const editing = id != null;
+  const item = editing ? D()[keyOf(dir)].find(x => String(x.id) === String(id)) : null;
+  if (editing && !item) return;
+  let cur = dir;
+  const fields = () => [
+    { k: 'amount', label: cur === 'in' ? 'Quanto entrou?' : 'Quanto saiu?', type: 'money', req: 1, full: 1 },
+    { k: 'date', label: 'Dia', type: 'date', req: 1, full: 1 },
+    { k: 'description', label: 'Descrição', type: 'text', full: 1, ph: cur === 'in' ? 'Ex: comissão, venda' : 'Ex: mercado, gasolina' }
+  ];
+  const def = () => (cur === 'in' ? 'Entrada' : 'Saída');
+  const draw = (sh, keep) => {
+    const vals = keep || (item ? { amount: item.amount, date: item.date, description: item.description } : { date: defaultDate() });
+    sh.querySelector('.sheet-body').innerHTML = (editing ? '' : `<div class="type-tabs" style="grid-template-columns:1fr 1fr">${[['in', 'down', 'Entrada'], ['out', 'up', 'Saída']].map(([k, i, l]) => `<button type="button" data-sdir="${k}" class="${k === cur ? 'on' : ''} ${k}">${ic(i)}${l}</button>`).join('')}</div>`) +
+      `<form class="fields sform ${cur}" novalidate>${fields().map(f => fieldHTML(f, vals[f.k])).join('')}</form>`;
+    sh.querySelector('.sheet-head h3').textContent = editing ? (cur === 'in' ? 'Editar entrada' : 'Editar saída') : (cur === 'in' ? 'Nova entrada' : 'Nova saída');
+    sh.querySelector('[data-save]').className = `btn ${cur === 'in' ? 'green' : 'red'}-solid`;
+    sh.querySelectorAll('[data-sdir]').forEach(b => b.onclick = () => {
+      const keep = {}; sh.querySelectorAll('[data-k]').forEach(el => { keep[el.dataset.k] = el.dataset.k === 'amount' ? parseMoney(el.value) : el.value; });
+      cur = b.dataset.sdir; S.ui.simpleDir = cur; draw(sh, keep); const a = sh.querySelector('[data-k="amount"]'); a && a.focus();
+    });
+    sh.querySelector('form').onsubmit = e => { e.preventDefault(); sh.querySelector('[data-save]').click(); };
+    sh.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sh.querySelector('[data-save]').click(); } }));
+  };
+  const syncPay = it => {
+    D().payments = D().payments.filter(p => !(p.type === 'variable' && String(p.originalId) === String(it.id)));
+    const [yy, mm] = parts(it.date); setPaid('variable', it.id, true, mm - 1, yy, mm - 1, yy);
+  };
+  openSheet({
+    title: '', body: '',
+    foot: `${editing ? `<button class="btn danger" data-del>${ic('trash')}<span>Excluir</span></button>` : ''}<span class="grow"></span><button class="btn" data-cancel>Cancelar</button><button class="btn" data-save>Salvar</button>`,
+    onMount: (sh, close) => {
+      draw(sh);
+      setTimeout(() => { const a = sh.querySelector('[data-k="amount"]'); if (a) a.focus(); }, 280);
+      sh.querySelector('[data-cancel]').onclick = close;
+      sh.querySelector('[data-save]').onclick = () => {
+        const v = readFields(sh, fields()); if (!v) return;
+        const key = keyOf(cur), desc = v.description || def();
+        if (editing) {
+          Object.assign(item, { amount: v.amount, date: v.date, description: desc });
+          if (key === 'variableExpenses') { syncPay(item); commit([key, 'payments']); } else commit([key]);
+          toast('Alterações salvas');
+        } else if (cur === 'in') {
+          D().earnings.push({ id: uid('ear'), description: desc, amount: v.amount, date: v.date, color: '#10b981', simple: true });
+          commit(['earnings']); toast(`Entrada de ${fmt(v.amount)} lançada`);
+        } else {
+          const it = { id: uid('var'), description: desc, amount: v.amount, date: v.date, category: '', simple: true };
+          D().variableExpenses.push(it); syncPay(it);
+          commit(['variableExpenses', 'payments']); toast(`Saída de ${fmt(v.amount)} lançada`);
+        }
+        const [yy, mm] = parts(v.date);
+        if (yy !== S.y || mm - 1 !== S.m) { S.m = mm - 1; S.y = yy; render(); }
+        close();
+      };
+      const del = sh.querySelector('[data-del]');
+      if (del) del.onclick = async () => {
+        if (!(await ask('Excluir lançamento?', `"${esc(item.description)}" de ${fmt(item.amount)} será apagado.`, 'Excluir', true))) return;
+        const key = keyOf(cur);
+        D()[key] = D()[key].filter(x => x !== item);
+        if (key === 'variableExpenses') { D().payments = D().payments.filter(p => !(p.type === 'variable' && String(p.originalId) === String(item.id))); commit([key, 'payments']); } else commit([key]);
+        close(); toast('Lançamento excluído');
+      };
+    }
+  });
+}
+const VIEW_FN = { simples: viewSimples, inicio: viewInicio, contas: viewContas, entradas: viewEntradas, fixas: viewFixas, gastos: viewGastos, cartoes: viewCartoes, investimentos: viewInvest, dividas: viewDividas, negativados: viewNegativados, prioridades: viewPrioridades, ajustes: viewAjustes };
+const TITLES = Object.fromEntries(NAV.concat(NAV_SIMPLE).filter(n => n.v).map(n => [n.v, n.t]));
 const MONTHLESS = ['negativados', 'prioridades', 'ajustes'];
 
 function manageCategories() {
@@ -1130,7 +1279,7 @@ function greeting() { const h = new Date().getHours(); return h < 5 ? 'Boa noite
 
 // ---------- renderização ----------
 function navHTML() {
-  return NAV.map(n => n.sep ? `<div class="nav-sep">${n.sep}</div>` : `<a href="#${n.v}" class="${S.view === n.v ? 'active' : ''}">${ic(n.i)}<span>${n.t}</span></a>`).join('');
+  return navList().map(n => n.sep ? `<div class="nav-sep">${n.sep}</div>` : `<a href="#${n.v}" class="${S.view === n.v ? 'active' : ''}">${ic(n.i)}<span>${n.t}</span></a>`).join('');
 }
 function userChip() {
   if (S.mode === 'cloud' && S.user) { const u = S.user; return `<div class="user-chip"><span class="avatar">${u.photoURL ? `<img src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer">` : esc((u.displayName || u.email || '?')[0].toUpperCase())}</span><div class="who"><b>${esc(u.displayName || 'Minha conta')}</b><span>${esc(u.email || '')}</span></div></div>`; }
@@ -1146,16 +1295,25 @@ function renderApp() {
 }
 function render() {
   if (!S.ready || !$('#content')) return;
+  fixView();
   const scrollY = window.scrollY, active = document.activeElement, qKey = active && active.dataset ? active.dataset.q : null, caret = qKey ? active.selectionStart : 0;
   $('#nav').innerHTML = navHTML();
   const monthly = !MONTHLESS.includes(S.view);
-  $('#topbar').innerHTML = `<h1>${S.view === 'inicio' && firstName() ? `${greeting()}, ${esc(firstName())} 👋` : esc(TITLES[S.view])}</h1><span class="spacer"></span>
+  const sm = isSimple();
+  $('#topbar').innerHTML = `<h1>${(S.view === 'inicio' || S.view === 'simples') && firstName() ? `${greeting()}, ${esc(firstName())} 👋` : esc(TITLES[S.view])}</h1><span class="spacer"></span>
+    <div class="seg mode-seg" role="group" aria-label="Modo de visualização"><button data-act="mode" data-v="simple" class="${sm ? 'on' : ''}" title="Só entradas e saídas, dia a dia">Simples</button><button data-act="mode" data-v="full" class="${sm ? '' : 'on'}" title="Contas, cartões, investimentos e mais">Completo</button></div>
     ${monthly ? `<div class="month-picker"><button data-act="prev" aria-label="Mês anterior">${ic('chevL')}</button><button class="label" data-act="pickmonth" title="Escolher mês e ano">${MONTHS[S.m]} ${S.y}</button><button data-act="next" aria-label="Próximo mês">${ic('chevR')}</button></div>${S.m !== new Date().getMonth() || S.y !== new Date().getFullYear() ? `<button class="today-btn" data-act="today" title="Voltar para ${MONTHS[new Date().getMonth()]}">${ic('undo')}<span>Mês atual</span></button>` : ''}` : ''}
     <span class="sync ${S.sync}" title="Status da sincronização"><span class="dot"></span><span class="lbl">${syncLabel()}</span></span>
     <button class="btn primary fab-desktop" data-act="quick">${ic('plus')} Lançar</button>`;
   $('#content').innerHTML = VIEW_FN[S.view]();
+  if (sm) {
+    $('#bnav').style.gridTemplateColumns = 'repeat(3, 1fr)';
+    $('#bnav').innerHTML = `<a href="#simples" class="${S.view === 'simples' ? 'active' : ''}">${ic('home')}<span>Meu caixa</span></a><button data-act="quick" aria-label="Novo lançamento"><span class="fab">${ic('plus')}</span></button><a href="#ajustes" class="${S.view === 'ajustes' ? 'active' : ''}">${ic('sliders')}<span>Ajustes</span></a>`;
+  } else {
+  $('#bnav').style.gridTemplateColumns = '';
   const tabs = [['inicio', 'home', 'Início'], ['contas', 'receipt', 'Contas'], null, ['cartoes', 'card', 'Cartões']];
   $('#bnav').innerHTML = tabs.map(t => t ? `<a href="#${t[0]}" class="${S.view === t[0] ? 'active' : ''}">${ic(t[1])}<span>${t[2]}</span></a>` : `<button data-act="quick" aria-label="Novo lançamento"><span class="fab">${ic('plus')}</span></button>`).join('') + `<button data-act="menu" class="${['inicio', 'contas', 'cartoes'].includes(S.view) ? '' : 'active'}" style="${['inicio', 'contas', 'cartoes'].includes(S.view) ? '' : 'color:var(--primary)'}">${ic('grid')}<span>Mais</span></button>`;
+  }
   if (qKey) { const el = document.querySelector(`[data-q="${qKey}"]`); if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch {} } }
   window.scrollTo(0, scrollY);
 }
@@ -1172,21 +1330,22 @@ function pickMonth() {
     onMount: (sh, close) => { draw(sh); sh.querySelector('[data-now]').onclick = () => { S.m = t.getMonth(); S.y = t.getFullYear(); close(); render(); }; } }).el.style.width = 'min(420px, calc(100vw - 32px))';
 }
 function openMenu() {
-  openSheet({ title: 'Menu', body: `<div class="menu-grid">${NAV.filter(n => n.v).map(n => `<a href="#${n.v}" class="${S.view === n.v ? 'active' : ''}" data-menu-link><span class="ico-c tone-primary">${ic(n.i)}</span>${n.t}</a>`).join('')}</div>${S.mode === 'cloud' ? `<button class="btn danger block" style="margin:10px 0 6px" data-act="logout">${ic('logout')} Sair da conta</button>` : ''}`, onMount: (sh, close) => sh.querySelectorAll('[data-menu-link]').forEach(a => a.addEventListener('click', close)) });
+  openSheet({ title: 'Menu', body: `<div class="menu-grid">${navList().filter(n => n.v).map(n => `<a href="#${n.v}" class="${S.view === n.v ? 'active' : ''}" data-menu-link><span class="ico-c tone-primary">${ic(n.i)}</span>${n.t}</a>`).join('')}</div>${S.mode === 'cloud' ? `<button class="btn danger block" style="margin:10px 0 6px" data-act="logout">${ic('logout')} Sair da conta</button>` : ''}`, onMount: (sh, close) => sh.querySelectorAll('[data-menu-link]').forEach(a => a.addEventListener('click', close)) });
 }
 function go(v) { if (location.hash !== '#' + v) location.hash = v; else route(); }
 function route() {
   const v = (location.hash || '').replace('#', '');
-  S.view = VIEWS.includes(v) ? v : 'inicio';
+  S.view = VIEWS.includes(v) ? v : (S.ready && isSimple() ? 'simples' : 'inicio');
   if (S.ready) { render(); window.scrollTo(0, 0); }
 }
 window.addEventListener('hashchange', route);
 
 // ---------- eventos ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-act],[data-detail],[data-edit],[data-goto],[data-seg],[data-cexp],[data-openpay],[data-theme-set]');
+  const t = e.target.closest('[data-act],[data-sedit],[data-detail],[data-edit],[data-goto],[data-seg],[data-cexp],[data-openpay],[data-theme-set]');
   if (!t || !S.ready) return;
   if (t.matches('input')) return;
+  if (t.dataset.sedit) { const [k, id] = t.dataset.sedit.split('|'); return simpleForm(k === 'earnings' ? 'in' : 'out', id); }
   if (t.dataset.detail) return details(t.dataset.detail);
   if (t.dataset.edit) return editItem(t.dataset.edit, t.dataset.id);
   if (t.dataset.goto) return go(t.dataset.goto);
@@ -1206,7 +1365,9 @@ document.addEventListener('click', async e => {
     case 'next': S.m++; if (S.m > 11) { S.m = 0; S.y++; } return render();
     case 'today': S.m = new Date().getMonth(); S.y = new Date().getFullYear(); return render();
     case 'pickmonth': return pickMonth();
-    case 'quick': return quickAdd();
+    case 'quick': return isSimple() ? simpleForm(S.ui.simpleDir || 'in') : quickAdd();
+    case 'sadd': return simpleForm(t.dataset.dir);
+    case 'mode': return setMode(t.dataset.v === 'simple');
     case 'menu': return openMenu();
     case 'new': return editItem(t.dataset.key);
     case 'cardbuy': return addCardPurchase();

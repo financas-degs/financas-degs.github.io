@@ -151,6 +151,7 @@ const NAV = [
 const D = () => S.data;
 // modo simplificado: só entradas e saídas, dia a dia (usa as mesmas listas do modo completo)
 const isSimple = () => !!(D().settings && D().settings.simple);
+const percentWithCards = () => !(D().settings && D().settings.percentCards === false);
 const NAV_SIMPLE = [{ v: 'simples', t: 'Meu caixa', i: 'home' }, { sep: 'Conta' }, { v: 'ajustes', t: 'Ajustes', i: 'sliders' }];
 const SIMPLE_VIEWS = ['simples', 'ajustes'];
 const navList = () => isSimple() ? NAV_SIMPLE : NAV;
@@ -375,7 +376,8 @@ function calc(m, y) {
     invoices, cardsDue, investMonth, investTotal, outflows, expenses,
     remaining: income - expenses,
     overdueTotal: overdue.reduce((s, x) => s + x.amount, 0),
-    percent: income > 0 ? (fixedTotal / income) * 100 : 0,
+    percentBase: fixedTotal + (percentWithCards() ? cardsDue : 0),
+    percent: income > 0 ? ((fixedTotal + (percentWithCards() ? cardsDue : 0)) / income) * 100 : 0,
     monthlyTotal: payables.reduce((s, x) => s + x.amount, 0) + investTotal,
     pendingTotal: payables.filter(p => !p.isPaid).reduce((s, x) => s + x.amount, 0),
     paidTotal: payables.filter(p => p.isPaid).reduce((s, x) => s + x.amount, 0),
@@ -760,7 +762,7 @@ function details(kind) {
     case 'vencido':
       title = 'Contas vencidas'; items = c.overdue.map(o => L(o.name, o.kind, o.amount, 'neg')); total = c.overdueTotal; break;
     case 'percent':
-      title = '% da renda comprometida'; items = [L('Contas fixas do mês', '', c.fixedTotal), L('Total de entradas', '', c.income, 'pos')]; total = null; break;
+      title = '% da renda comprometida'; items = [L('Contas fixas do mês', '', c.fixedTotal)].concat(percentWithCards() ? [L('Faturas de cartão do mês', '', c.cardsDue)] : []).concat([L('Total de entradas', '', c.income, 'pos')]); total = null; break;
     case 'monthlyTotal': {
       title = 'Compromisso mensal (tudo que vence no mês)';
       const by = t => c.payables.filter(p => p.type === t).reduce((s, x) => s + x.amount, 0);
@@ -774,7 +776,7 @@ function details(kind) {
       title = 'Prioridades e desejos'; items = D().priorities.map(p => L(p.description, `Prioridade ${p.level}`, p.amount)); total = c.priTotal; break;
   }
   const body = `<div class="list">${items.length ? items.map((it, i) => `<div class="row"><div class="grow"><div class="t">${esc(it.desc)}</div>${it.sub ? `<div class="s">${esc(it.sub)}</div>` : ''}</div><div class="amt num ${it.tone}">${fmt(it.amount)}</div>${it.extra && it.extra.pay ? `<button class="icon-btn" title="Desfazer pagamento" data-undo="${i}">${ic('undo')}</button>` : ''}</div>`).join('') : `<div class="empty">Nada por aqui neste mês.</div>`}</div>`;
-  const foot = total === null ? `<div class="grow"><b style="font-size:20px" class="num">${c.percent.toFixed(1)}%</b> <span class="muted">da renda vai para contas fixas</span></div>` : `<div class="grow muted">Total</div><b class="num" style="font-size:19px">${fmt(total)}</b>`;
+  const foot = total === null ? `<div class="grow"><b style="font-size:20px" class="num">${c.percent.toFixed(1)}%</b> <span class="muted">da renda vai para contas fixas${percentWithCards() ? ' e cartões' : ''}</span><div class="muted" style="font-size:12px;margin-top:4px">${percentWithCards() ? 'Faturas de cartão incluídas' : 'Faturas de cartão não incluídas'} · altere em Ajustes</div></div>` : `<div class="grow muted">Total</div><b class="num" style="font-size:19px">${fmt(total)}</b>`;
   openSheet({
     title: `${title} · ${MONTHS[S.m]}`, body, foot,
     onMount: (sh, close) => sh.querySelectorAll('[data-undo]').forEach(b => b.onclick = async () => {
@@ -1048,6 +1050,9 @@ function viewAjustes() {
     ${carryCfg().enabled ? `<div class="set-row"><div class="grow"><b>Começar a contar em</b><span>${carryCfg().startMonth ? 'Escolhido por você' : `Automático: ${MONTHS[carryStart() % 12]} de ${Math.floor(carryStart() / 12)} (primeiro mês com lançamentos)`}</span></div><input type="month" class="input" style="width:auto;min-height:40px;padding:8px 10px" data-carry="startMonth" value="${esc(carryCfg().startMonth || monthStr(carryStart() % 12, Math.floor(carryStart() / 12)))}"></div>
     <div class="set-row"><div class="grow"><b>Saldo inicial</b><span>Quanto você tinha (ou devia) no começo desse mês. Pode ser negativo.</span></div><div class="money" style="width:170px"><span>R$</span><input class="input" style="padding-left:38px;min-height:40px" inputmode="decimal" data-carry="initial" value="${esc(moneyIn(carryCfg().initial))}" placeholder="0,00"></div></div>` : ''}
   </div></div>
+  ${isSimple() ? '' : `<div class="card"><div class="card-head"><div><h3>% da renda comprometida</h3><div class="sub">O que entra no cálculo do indicador "% comprometido"</div></div></div><div class="card-body">
+    <div class="set-row"><span class="ico-c tone-violet">${ic('card')}</span><div class="grow"><b>Incluir cartão de crédito</b><span>Soma as faturas do mês às contas fixas antes de calcular o % da renda. Desligado, conta só as contas fixas.</span></div><label class="switch" style="padding:7px 10px"><input type="checkbox" data-pctcards${percentWithCards() ? ' checked' : ''}></label></div>
+  </div></div>`}
   <div class="card"><div class="card-head"><h3>Aparência</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Tema</b><span>Claro, escuro ou igual ao do aparelho</span></div><div class="seg">${[['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Escuro']].map(([k, l]) => `<button data-theme-set="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('')}</div></div></div></div>
   ${isSimple() ? '' : `<div class="card"><div class="card-head"><div><h3>Painel inicial</h3><div class="sub">Escolha o que aparece na tela de início</div></div></div><div class="card-body"><div class="toggles">
     ${Object.entries(CARD_LABELS).concat(Object.entries(WIDGET_LABELS)).map(([k, l]) => `<label class="switch"><span>${esc(l)}</span><input type="checkbox" data-vis="${k}"${vis(k) ? ' checked' : ''}></label>`).join('')}</div></div></div>`}
@@ -1058,7 +1063,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.6</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.7</p></div>`;
 }
 
 // ---------- modo simplificado ----------
@@ -1403,6 +1408,7 @@ document.addEventListener('change', e => {
     else { const raw = String(t.value).trim(), neg = raw.startsWith('-'), v = parseMoney(raw.replace('-', '')); cfg.initial = Number.isFinite(v) ? (neg ? -v : v) : 0; }
     D().settings.carry = cfg; commit(['settings']); return;
   }
+  if (t.dataset.pctcards !== undefined) { D().settings.percentCards = t.checked; commit(['settings']); toast(t.checked ? 'Cartão incluído no % comprometido' : 'Cartão removido do % comprometido'); return; }
   if (t.dataset.vis) { D().settings.visibleCards[t.dataset.vis] = t.checked; commit(['settings']); return; }
   if (t.dataset.import !== undefined && t.files && t.files[0]) { importFile(t.files[0]); t.value = ''; }
 });

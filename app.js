@@ -695,7 +695,7 @@ function quickAdd(type) {
     fixa: { fields: [
       { k: 'name', label: 'Nome da conta', type: 'text', req: 1, full: 1, ph: 'Ex: Aluguel, internet, luz' },
       { k: 'amount', label: 'Valor mensal', type: 'money', req: 1 }, { k: 'dueDay', label: 'Dia do vencimento', type: 'day', req: 1 },
-      { k: 'startDate', label: 'Começa em', type: 'month', req: 1, full: 1, hint: 'Repete todo mês a partir daqui' }], values: DEFAULTS.fixedCosts() }
+      { k: 'startDate', label: 'Começa em', type: 'month', req: 1, hint: 'Primeiro mês' }, { k: 'endDate', label: 'Termina em', type: 'month', hint: 'Vazio = sem fim' }], values: DEFAULTS.fixedCosts() }
   };
   const draw = (sh) => {
     const t = S.ui.quickType, c = cfg[t];
@@ -724,7 +724,7 @@ function quickAdd(type) {
           if (paid) { const [yy, mm] = parts(item.date); setPaid('variable', item.id, true, mm - 1, yy, mm - 1, yy); }
           commit(['variableExpenses', 'payments']); toast('Gasto lançado');
         } else if (t === 'entrada') { D().earnings.push(Object.assign({ id: uid('ear'), color: '#10b981' }, v)); commit(['earnings']); toast('Entrada lançada'); }
-        else if (t === 'fixa') { D().fixedCosts.push(Object.assign({ id: uid('fix'), color: SWATCHES[D().fixedCosts.length % SWATCHES.length] }, v)); commit(['fixedCosts']); toast('Conta fixa adicionada'); }
+        else if (t === 'fixa') { if (v.endDate && v.endDate < v.startDate) { toast('O mês de término deve ser depois do início.', true); return; } if (!v.endDate) delete v.endDate; D().fixedCosts.push(Object.assign({ id: uid('fix'), color: SWATCHES[D().fixedCosts.length % SWATCHES.length] }, v)); commit(['fixedCosts']); toast('Conta fixa adicionada'); }
         else if (t === 'cartao') saveCardPurchase(v);
         else { D().investments.push(Object.assign({ id: uid('inv') }, v)); commit(['investments']); toast('Aporte lançado'); }
         close();
@@ -1068,7 +1068,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.8</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.8.1</p></div>`;
 }
 
 // ---------- modo simplificado ----------

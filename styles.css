@@ -303,7 +303,7 @@ svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none;
 .grabber { display: none; }
 
 /* Forms */
-.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 12px; }
+.fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 12px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field.full { grid-column: 1 / -1; }
 .field label { font-size: 13px; font-weight: 600; color: var(--text-2); }
@@ -314,6 +314,7 @@ svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none;
 }
 .field input:focus, .field select:focus, .input:focus { border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent); }
 .field input[type=color] { padding: 4px; height: 44px; cursor: pointer; }
+.field input[type=month], .field input[type=date] { min-width: 0; width: 100%; }
 .money { position: relative; }
 .money span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-weight: 600; font-size: 14px; }
 .money input { padding-left: 38px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -434,7 +435,7 @@ svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none;
   .sheet.show { transform: translateY(0); }
   .grabber { display: block; width: 40px; height: 5px; border-radius: 5px; background: var(--surface-3); margin: 8px auto 0; }
   .sheet-head { padding-top: 10px; }
-  .fields { grid-template-columns: 1fr 1fr; }
+  .fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .login { grid-template-columns: 1fr; }
   .login-art { padding: calc(28px + env(safe-area-inset-top)) 24px 28px; }
   .login-art h1 { font-size: 28px; }

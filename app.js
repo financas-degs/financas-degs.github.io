@@ -85,9 +85,9 @@ const LOGO = '<svg class="brand-logo" viewBox="0 0 64 64" aria-hidden="true"><de
 // ---------- modelo de dados (compatível com a v14) ----------
 const KEYS = ['fixedIncome','earnings','fixedCosts','categories','variableExpenses','cards','cardExpenses','investments','debts','debtsReceivable','payments','negatives','priorities','settings'];
 const CARD_LABELS = {
-  entradas: 'Total de entradas', saidas: 'Total de saídas', restante: 'Saldo do mês', compromisso: 'Compromisso fixo',
+  entradas: 'Total de entradas', saidas: 'Total de saídas', restante: 'Saldo do mês', compromisso: 'Contas fixas',
   invest: 'Investimentos do mês', fatura: 'Faturas do mês', vencido: 'Total vencido', percent: '% comprometido',
-  monthlyTotal: 'Compromisso mensal', negativados: 'Negativados', prioridades: 'Prioridades'
+  monthlyTotal: 'Total a pagar no mês', negativados: 'Negativados', prioridades: 'Prioridades'
 };
 const WIDGET_LABELS = {
   chartDonut: 'Gráfico: fluxo de caixa', chartCategory: 'Gráfico: gastos por categoria', chartTrend: 'Gráfico: últimos 6 meses',
@@ -780,7 +780,7 @@ function details(kind) {
         total = (ci ? ci.prev : 0) + monthResult(c); }
       break;
     case 'compromisso':
-      title = 'Compromisso fixo (só contas fixas)'; items = c.payables.filter(p => p.type === 'fixed').map(p => L(p.name, `Vence dia ${p.day}${p.isPaid ? ' · paga' : ''}`, p.amount)); total = c.fixedTotal; break;
+      title = 'Contas fixas (só as que se repetem todo mês)'; items = c.payables.filter(p => p.type === 'fixed').map(p => L(p.name, `Vence dia ${p.day}${p.isPaid ? ' · paga' : ''}`, p.amount)); total = c.fixedTotal; break;
     case 'invest':
       title = 'Patrimônio acumulado';
       const end = new Date(S.y, S.m + 1, 0);
@@ -794,7 +794,7 @@ function details(kind) {
     case 'percent':
       title = '% da renda comprometida'; items = [L('Contas fixas do mês', '', c.fixedTotal)].concat(percentWithCards() ? [L('Faturas de cartão do mês', '', c.cardsDue)] : []).concat([L('Total de entradas', '', c.income, 'pos')]); total = null; break;
     case 'monthlyTotal': {
-      title = 'Compromisso mensal (tudo que vence no mês)';
+      title = 'Total a pagar no mês (fixas + cartão + gastos + parcelas)';
       const by = t => c.payables.filter(p => p.type === t).reduce((s, x) => s + x.amount, 0);
       [['Contas fixas', 'fixed'], ['Faturas de cartão', 'card_invoice'], ['Gastos variáveis', 'variable'], ['Parcelas de dívidas', 'debt_installment']].forEach(([l, t]) => { const v = by(t); if (v) items.push(L(l, '', v)); });
       if (c.investTotal) items.push(L('Investimentos', 'Aportes do mês', c.investTotal));
@@ -1093,7 +1093,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.9</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.9.1</p></div>`;
 }
 
 // ---------- modo simplificado ----------
@@ -1337,7 +1337,7 @@ function render() {
   const sm = isSimple();
   $('#topbar').innerHTML = `<h1>${(S.view === 'inicio' || S.view === 'simples') && firstName() ? `${greeting()}, ${esc(firstName())} 👋` : esc(TITLES[S.view])}</h1><span class="spacer"></span>
     <div class="seg mode-seg" role="group" aria-label="Modo de visualização"><button data-act="mode" data-v="simple" class="${sm ? 'on' : ''}" title="Só entradas e saídas, dia a dia">Simples</button><button data-act="mode" data-v="full" class="${sm ? '' : 'on'}" title="Contas, cartões, investimentos e mais">Completo</button></div>
-    ${monthly ? `<div class="month-picker"><button data-act="prev" aria-label="Mês anterior">${ic('chevL')}</button><button class="label" data-act="pickmonth" title="Escolher mês e ano">${MONTHS[S.m]} ${S.y}</button><button data-act="next" aria-label="Próximo mês">${ic('chevR')}</button></div>${S.m !== new Date().getMonth() || S.y !== new Date().getFullYear() ? `<button class="today-btn" data-act="today" title="Voltar para ${MONTHS[new Date().getMonth()]}">${ic('undo')}<span>Mês atual</span></button>` : ''}` : ''}
+    ${monthly ? `${S.m !== new Date().getMonth() || S.y !== new Date().getFullYear() ? `<button class="today-btn" data-act="today" title="Voltar para ${MONTHS[new Date().getMonth()]}">${ic('undo')}<span>Mês atual</span></button>` : ''}<div class="month-picker"><button data-act="prev" aria-label="Mês anterior">${ic('chevL')}</button><button class="label" data-act="pickmonth" title="Escolher mês e ano">${MONTHS[S.m]} ${S.y}</button><button data-act="next" aria-label="Próximo mês">${ic('chevR')}</button></div>` : ''}
     <span class="sync ${S.sync}" title="Status da sincronização"><span class="dot"></span><span class="lbl">${syncLabel()}</span></span>
     <button class="btn primary fab-desktop" data-act="quick">${ic('plus')} Lançar</button>`;
   $('#content').innerHTML = VIEW_FN[S.view]();

@@ -37,6 +37,7 @@ const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
 
 // ---------- ícones ----------
 const P = {
+  pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   receipt: '<path d="M6 2.5h12V21l-3-2-3 2-3-2-3 2z"/><path d="M9 7.5h6M9 11h6M9 14.5h4"/>',
   down: '<path d="M12 4v15M5.5 12.5 12 19l6.5-6.5"/>',
@@ -278,6 +279,8 @@ const fixedActive = (c, m, y) => {
   if (c.endDate) { const [ey, em] = parts(c.endDate); if (y > ey || (y === ey && m > em - 1)) return false; }
   return true;
 };
+const fixedAmt = (c, m, y) => { const o = c.amounts && c.amounts[monthStr(m, y)]; return o != null ? num(o) : num(c.amount); };
+const fixedOver = (c, m, y) => !!(c.amounts && c.amounts[monthStr(m, y)] != null);
 const invoiceId = (cardId, m, y) => `inv_${cardId}_${m}_${y}`;
 
 // ---------- cálculos do mês (mesma lógica da v14) ----------
@@ -303,8 +306,8 @@ function calc(m, y) {
   let fixedTotal = 0;
   d.fixedCosts.forEach(c => {
     if (!fixedActive(c, m, y)) return;
-    fixedTotal += num(c.amount);
-    payables.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: 'Fixa', amount: num(c.amount), day: num(c.dueDay) || 1, color: safeColor(c.color, '#3b82f6'), isPaid: isPaid('fixed', c.id, m, y), tM: m, tY: y });
+    fixedTotal += fixedAmt(c, m, y);
+    payables.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: fixedOver(c, m, y) ? 'Fixa · valor do mês' : 'Fixa', amount: fixedAmt(c, m, y), day: num(c.dueDay) || 1, color: safeColor(c.color, '#3b82f6'), isPaid: isPaid('fixed', c.id, m, y), tM: m, tY: y });
   });
   const varMonth = d.variableExpenses.filter(v => inMonth(v.date, m, y));
   const catTotals = {};
@@ -340,7 +343,7 @@ function calc(m, y) {
   d.payments.filter(p => p.month === m && p.year === y).forEach(p => {
     const tM = p.targetMonth ?? p.month, tY = p.targetYear ?? p.year;
     let amount = 0, desc = '', sub = '', date = isoDay(p.date), edit = null, simple = null;
-    if (p.type === 'fixed') { const c = d.fixedCosts.find(x => String(x.id) === String(p.originalId)); if (c) { amount = num(c.amount); desc = c.name; sub = `Venc. ${pad(c.dueDay || 1)}/${pad(tM + 1)}/${tY}`; edit = ['fixedCosts', c.id]; } }
+    if (p.type === 'fixed') { const c = d.fixedCosts.find(x => String(x.id) === String(p.originalId)); if (c) { amount = fixedAmt(c, tM, tY); desc = c.name; sub = `Venc. ${pad(c.dueDay || 1)}/${pad(tM + 1)}/${tY}`; edit = ['fixedCosts', c.id]; } }
     else if (p.type === 'variable') { const v = d.variableExpenses.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.amount); desc = v.description || v.category; sub = `Gasto · ${fmtDate(v.date)}`; if (inMonth(v.date, m, y)) date = v.date; simple = ['variableExpenses', v.id]; } }
     else if (p.type === 'debt_installment') { const v = d.debts.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.totalAmount) / (v.installments || 1); desc = v.name; sub = `Parcela · ${pad(tM + 1)}/${tY}`; edit = ['debts', v.id]; } }
     else if (p.type === 'card_invoice') {
@@ -362,7 +365,7 @@ function calc(m, y) {
     const t = new Date(y, m - i, 1), om = t.getMonth(), oy = t.getFullYear();
     d.fixedCosts.forEach(c => {
       if (!fixedActive(c, om, oy) || isPaid('fixed', c.id, om, oy)) return;
-      overdue.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: `Atrasada · ${MSHORT[om]}/${oy}`, amount: num(c.amount), day: num(c.dueDay) || 1, color: '#ef4444', isPaid: false, tM: om, tY: oy, overdue: true });
+      overdue.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: `Atrasada · ${MSHORT[om]}/${oy}${fixedOver(c, om, oy) ? ' · valor ajustado' : ''}`, amount: fixedAmt(c, om, oy), day: num(c.dueDay) || 1, color: '#ef4444', isPaid: false, tM: om, tY: oy, overdue: true });
     });
   }
   overdue.sort((a, b) => (a.tY - b.tY) || (a.tM - b.tM) || (a.day - b.day));
@@ -636,6 +639,28 @@ function editItem(key, id) {
   });
 }
 
+// ---------- valor de uma conta fixa num mês específico ----------
+function editFixedMonth(id, m, y) {
+  const c = D().fixedCosts.find(x => String(x.id) === String(id)); if (!c) return;
+  const key = monthStr(m, y), over = fixedOver(c, m, y);
+  const el = openForm({
+    title: `${c.name || 'Conta fixa'} · ${MONTHS[m].toLowerCase()}/${y}`,
+    fields: [{ k: 'amount', label: `Valor de ${MONTHS[m].toLowerCase()}`, type: 'money', req: 1, full: 1, hint: 'Ex.: valor da fatura do mês, ou com juros se atrasou' }],
+    values: { amount: fixedAmt(c, m, y) },
+    extra: `<p class="muted" style="font-size:13px;margin:14px 0 0">Muda <b>só este mês</b>. Os outros meses continuam com o valor padrão de <b>${fmt(c.amount)}</b>.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${over ? `<button class="btn sm" data-fm-reset>${ic('undo')} Voltar ao padrão</button>` : ''}<button class="btn ghost sm" data-fm-default>${ic('repeat')} Mudar o valor padrão</button></div>`,
+    onSave: v => {
+      c.amounts = Object.assign({}, c.amounts);
+      if (Math.abs(num(v.amount) - num(c.amount)) < 0.005) delete c.amounts[key]; else c.amounts[key] = num(v.amount);
+      if (!Object.keys(c.amounts).length) delete c.amounts;
+      commit(['fixedCosts']); toast(`Valor de ${MONTHS[m].toLowerCase()} atualizado`);
+    }
+  });
+  const r = el.querySelector('[data-fm-reset]');
+  if (r) r.onclick = () => { delete c.amounts[key]; if (!Object.keys(c.amounts).length) delete c.amounts; commit(['fixedCosts']); closeSheet(); toast('Voltou ao valor padrão'); };
+  el.querySelector('[data-fm-default]').onclick = () => { closeSheet(); editItem('fixedCosts', c.id); };
+}
+
 // ---------- compras no cartão ----------
 function addCardPurchase(prefill = {}) {
   if (!D().cards.length) { toast('Cadastre um cartão primeiro.'); editItem('cards'); return; }
@@ -823,7 +848,7 @@ const vis = k => D().settings.visibleCards[k] !== false;
 function payRow(p, opts = {}) {
   const cls = `row${p.isPaid ? ' paid' : ''}${(p.late || p.overdue) && !p.isPaid ? ' late' : ''}`;
   const sub = p.overdue ? p.kind : `${p.kind} · ${p.late && !p.isPaid ? 'venceu' : 'vence'} dia ${p.day}`;
-  return `<div class="${cls}"><input type="checkbox" class="check" aria-label="Marcar como pago" data-pay="${esc(p.type)}" data-id="${esc(p.id)}" data-tm="${p.tM}" data-ty="${p.tY}"${p.isPaid ? ' checked' : ''}><span class="dot-c" style="background:${p.color}"></span><div class="grow"${opts.edit !== false ? ` data-openpay="${esc(p.type)}" data-id="${esc(p.id)}" style="cursor:pointer"` : ''}><div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></div><div class="amt num">${fmt(p.amount)}</div></div>`;
+  return `<div class="${cls}"><input type="checkbox" class="check" aria-label="Marcar como pago" data-pay="${esc(p.type)}" data-id="${esc(p.id)}" data-tm="${p.tM}" data-ty="${p.tY}"${p.isPaid ? ' checked' : ''}><span class="dot-c" style="background:${p.color}"></span><div class="grow"${opts.edit !== false ? ` data-openpay="${esc(p.type)}" data-id="${esc(p.id)}" style="cursor:pointer"` : ''}><div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></div>${p.type === 'fixed' ? `<button class="amt num amt-edit" data-famt="${esc(p.id)}" data-tm="${p.tM}" data-ty="${p.tY}" aria-label="Alterar valor deste mês">${fmt(p.amount)}${ic('pencil')}</button>` : `<div class="amt num">${fmt(p.amount)}</div>`}</div>`;
 }
 function emptyBox(icon, text, btn) { return `<div class="empty"><div class="ei">${ic(icon)}</div>${text}${btn ? `<div style="margin-top:12px">${btn}</div>` : ''}</div>`; }
 function kpi(key, icon, tone, value, valCls = '') {
@@ -944,8 +969,8 @@ function viewFixas() {
   const c = C();
   const active = D().fixedCosts.filter(x => fixedActive(x, S.m, S.y)).sort((a, b) => num(a.dueDay) - num(b.dueDay));
   const inactive = D().fixedCosts.filter(x => !fixedActive(x, S.m, S.y));
-  const row = x => { const paid = isPaid('fixed', x.id, S.m, S.y); return `<div class="row${paid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="fixed" data-id="${esc(x.id)}" data-tm="${S.m}" data-ty="${S.y}"${paid ? ' checked' : ''} aria-label="Marcar como pago"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow" data-edit="fixedCosts" data-id="${esc(x.id)}" style="cursor:pointer"><div class="t">${esc(x.name)}</div><div class="s">Vence dia ${esc(x.dueDay)} · desde ${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}</div></div><div class="amt num">${fmt(x.amount)}</div></div>`; };
-  const paidV = active.filter(x => isPaid('fixed', x.id, S.m, S.y)).reduce((s, x) => s + num(x.amount), 0);
+  const row = x => { const paid = isPaid('fixed', x.id, S.m, S.y); return `<div class="row${paid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="fixed" data-id="${esc(x.id)}" data-tm="${S.m}" data-ty="${S.y}"${paid ? ' checked' : ''} aria-label="Marcar como pago"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow" data-edit="fixedCosts" data-id="${esc(x.id)}" style="cursor:pointer"><div class="t">${esc(x.name)}</div><div class="s">Vence dia ${esc(x.dueDay)} · desde ${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}${fixedOver(x, S.m, S.y) ? ' · valor do mês' : ''}</div></div><button class="amt num amt-edit" data-famt="${esc(x.id)}" data-tm="${S.m}" data-ty="${S.y}" aria-label="Alterar valor deste mês">${fmt(fixedAmt(x, S.m, S.y))}${ic('pencil')}</button></div>`; };
+  const paidV = active.filter(x => isPaid('fixed', x.id, S.m, S.y)).reduce((s, x) => s + fixedAmt(x, S.m, S.y), 0);
   return `<div class="stats"><div class="card stat"><span>Total fixo do mês</span><b class="num">${fmt(c.fixedTotal)}</b></div><div class="card stat"><span>Pago</span><b class="num pos">${fmt(paidV)}</b></div><div class="card stat"><span>% da renda</span><b class="num">${c.percent.toFixed(1)}%</b></div></div>
   <div class="grid">${listCard(`Contas de ${MONTHS[S.m].toLowerCase()}`, 'Toque no nome para editar', active.map(row), 'fixedCosts', 'Nova conta', 'repeat', 'Nenhuma conta fixa ativa neste mês.')}
   ${inactive.length ? `<div class="card"><div class="card-head"><h3>Fora deste mês</h3><span class="sub">Ainda não começaram ou já terminaram</span></div><div class="card-body"><div class="list">${inactive.map(x => `<div class="row click" data-edit="fixedCosts" data-id="${esc(x.id)}"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}</div></div><div class="amt num muted">${fmt(x.amount)}</div></div>`).join('')}</div></div></div>` : ''}</div>`;
@@ -1068,7 +1093,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.8.1</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.9</p></div>`;
 }
 
 // ---------- modo simplificado ----------
@@ -1352,7 +1377,7 @@ window.addEventListener('hashchange', route);
 
 // ---------- eventos ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-act],[data-sedit],[data-detail],[data-edit],[data-goto],[data-seg],[data-cexp],[data-openpay],[data-theme-set]');
+  const t = e.target.closest('[data-act],[data-sedit],[data-detail],[data-edit],[data-goto],[data-seg],[data-cexp],[data-openpay],[data-famt],[data-theme-set]');
   if (!t || !S.ready) return;
   if (t.matches('input')) return;
   if (t.dataset.sedit) { const [k, id] = t.dataset.sedit.split('|'); return simpleForm(k === 'earnings' ? 'in' : 'out', id); }
@@ -1362,6 +1387,7 @@ document.addEventListener('click', async e => {
   if (t.dataset.cexp) return editCardExpense(t.dataset.cexp);
   if (t.dataset.themeSet) { lsSet('financas.theme', t.dataset.themeSet); applyTheme(); return render(); }
   if (t.dataset.seg) { const k = t.dataset.seg; S.ui[k] = k === 'investAll' ? t.dataset.v === '1' : t.dataset.v; return render(); }
+  if (t.dataset.famt) return editFixedMonth(t.dataset.famt, +t.dataset.tm, +t.dataset.ty);
   if (t.dataset.openpay) {
     const type = t.dataset.openpay, id = t.dataset.id;
     if (type === 'fixed') return editItem('fixedCosts', id);

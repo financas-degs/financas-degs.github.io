@@ -289,7 +289,7 @@ function calc(m, y) {
   const r = { m, y };
   const earningsMonth = d.earnings.filter(e => inMonth(e.date, m, y));
   const fixedIncomeMonth = d.fixedIncome.filter(x => fixedActive(x, m, y));
-  const fixedIncomeTotal = fixedIncomeMonth.reduce((s, x) => s + num(x.amount), 0);
+  const fixedIncomeTotal = fixedIncomeMonth.reduce((s, x) => s + fixedAmt(x, m, y), 0);
   let income = fixedIncomeTotal + earningsMonth.reduce((s, x) => s + num(x.amount), 0);
   const receivables = [];
   d.debtsReceivable.forEach(rec => {
@@ -339,13 +339,13 @@ function calc(m, y) {
   const investTotal = investMonth.reduce((s, x) => s + num(x.amount), 0);
 
   // Saídas = pagamentos marcados neste mês + aportes do mês
-  const outflows = investMonth.map(i => ({ desc: `Aporte: ${i.name || 'Investimento'}`, sub: 'Investimento', amount: num(i.amount), tone: 'blue', date: i.date, edit: ['investments', i.id] }));
+  const outflows = investMonth.map(i => ({ desc: `Aporte: ${i.name || 'Investimento'}`, sub: 'Investimento', amount: num(i.amount), tone: 'blue', date: i.date, edit: ['investments', i.id], q: `investments|${i.id}` }));
   d.payments.filter(p => p.month === m && p.year === y).forEach(p => {
     const tM = p.targetMonth ?? p.month, tY = p.targetYear ?? p.year;
-    let amount = 0, desc = '', sub = '', date = isoDay(p.date), edit = null, simple = null;
-    if (p.type === 'fixed') { const c = d.fixedCosts.find(x => String(x.id) === String(p.originalId)); if (c) { amount = fixedAmt(c, tM, tY); desc = c.name; sub = `Venc. ${pad(c.dueDay || 1)}/${pad(tM + 1)}/${tY}`; edit = ['fixedCosts', c.id]; } }
-    else if (p.type === 'variable') { const v = d.variableExpenses.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.amount); desc = v.description || v.category; sub = `Gasto · ${fmtDate(v.date)}`; if (inMonth(v.date, m, y)) date = v.date; simple = ['variableExpenses', v.id]; } }
-    else if (p.type === 'debt_installment') { const v = d.debts.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.totalAmount) / (v.installments || 1); desc = v.name; sub = `Parcela · ${pad(tM + 1)}/${tY}`; edit = ['debts', v.id]; } }
+    let amount = 0, desc = '', sub = '', date = isoDay(p.date), edit = null, simple = null, q = '';
+    if (p.type === 'fixed') { const c = d.fixedCosts.find(x => String(x.id) === String(p.originalId)); if (c) { amount = fixedAmt(c, tM, tY); desc = c.name; sub = `Venc. ${pad(c.dueDay || 1)}/${pad(tM + 1)}/${tY}`; edit = ['fixedCosts', c.id]; q = `fixedCosts|${c.id}|${tM}|${tY}`; } }
+    else if (p.type === 'variable') { const v = d.variableExpenses.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.amount); desc = v.description || v.category; sub = `Gasto · ${fmtDate(v.date)}`; if (inMonth(v.date, m, y)) date = v.date; simple = ['variableExpenses', v.id]; q = `variableExpenses|${v.id}`; } }
+    else if (p.type === 'debt_installment') { const v = d.debts.find(x => String(x.id) === String(p.originalId)); if (v) { amount = num(v.totalAmount) / (v.installments || 1); desc = v.name; sub = `Parcela · ${pad(tM + 1)}/${tY}`; edit = ['debts', v.id]; q = `debts|${v.id}`; } }
     else if (p.type === 'card_invoice') {
       const ps = String(p.originalId).split('_');
       let iY = tY, iM = tM, cId = '';
@@ -354,9 +354,9 @@ function calc(m, y) {
       amount = d.cardExpenses.filter(e => String(e.cardId) === cId && inMonth(e.date, iM, iY)).reduce((s, x) => s + num(x.amount), 0);
       desc = `Fatura ${card ? card.name : 'Cartão'}`; sub = `Venc. ${pad(card ? card.dueDay : 10)}/${pad(iM + 1)}/${iY}`;
     }
-    if (amount > 0) outflows.push({ desc, sub, amount, tone: p.type === 'debt_installment' ? 'red' : '', pay: p, date, edit, simple, kind: p.type });
+    if (amount > 0) outflows.push({ desc, sub, amount, tone: p.type === 'debt_installment' ? 'red' : '', pay: p, date, edit, simple, kind: p.type, q });
   });
-  d.negatives.filter(n => n.paid && inMonth(n.paidDate, m, y)).forEach(n => outflows.push({ desc: `Quitação: ${n.description || 'Negativado'}`, sub: `Negativado · ${fmtDate(n.paidDate)}`, amount: num(n.paidAmount ?? n.amount), tone: 'red', date: n.paidDate, edit: ['negatives', n.id] }));
+  d.negatives.filter(n => n.paid && inMonth(n.paidDate, m, y)).forEach(n => outflows.push({ desc: `Quitação: ${n.description || 'Negativado'}`, sub: `Negativado · ${fmtDate(n.paidDate)}`, amount: num(n.paidAmount ?? n.amount), tone: 'red', date: n.paidDate, edit: ['negatives', n.id], q: `negatives|${n.id}` }));
   const expenses = outflows.reduce((s, x) => s + x.amount, 0);
 
   // Vencidos: contas fixas não pagas dos 12 meses anteriores
@@ -640,12 +640,13 @@ function editItem(key, id) {
 }
 
 // ---------- valor de uma conta fixa num mês específico ----------
-function editFixedMonth(id, m, y) {
-  const c = D().fixedCosts.find(x => String(x.id) === String(id)); if (!c) return;
+function editFixedMonth(id, m, y, lkey = 'fixedCosts') {
+  const inc = lkey === 'fixedIncome';
+  const c = D()[lkey].find(x => String(x.id) === String(id)); if (!c) return;
   const key = monthStr(m, y), over = fixedOver(c, m, y);
   const el = openForm({
-    title: `${c.name || 'Conta fixa'} · ${MONTHS[m].toLowerCase()}/${y}`,
-    fields: [{ k: 'amount', label: `Valor de ${MONTHS[m].toLowerCase()}`, type: 'money', req: 1, full: 1, hint: 'Ex.: valor da fatura do mês, ou com juros se atrasou' }],
+    title: `${c.name || c.description || (inc ? 'Renda fixa' : 'Conta fixa')} · ${MONTHS[m].toLowerCase()}/${y}`,
+    fields: [{ k: 'amount', label: `Valor de ${MONTHS[m].toLowerCase()}`, type: 'money', req: 1, full: 1, hint: inc ? 'Ex.: salário com hora extra, comissão maior ou menor' : 'Ex.: valor da fatura do mês, ou com juros se atrasou' }],
     values: { amount: fixedAmt(c, m, y) },
     extra: `<p class="muted" style="font-size:13px;margin:14px 0 0">Muda <b>só este mês</b>. Os outros meses continuam com o valor padrão de <b>${fmt(c.amount)}</b>.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${over ? `<button class="btn sm" data-fm-reset>${ic('undo')} Voltar ao padrão</button>` : ''}<button class="btn ghost sm" data-fm-default>${ic('repeat')} Mudar o valor padrão</button></div>`,
@@ -653,12 +654,41 @@ function editFixedMonth(id, m, y) {
       c.amounts = Object.assign({}, c.amounts);
       if (Math.abs(num(v.amount) - num(c.amount)) < 0.005) delete c.amounts[key]; else c.amounts[key] = num(v.amount);
       if (!Object.keys(c.amounts).length) delete c.amounts;
-      commit(['fixedCosts']); toast(`Valor de ${MONTHS[m].toLowerCase()} atualizado`);
+      commit([lkey]); toast(`Valor de ${MONTHS[m].toLowerCase()} atualizado`);
     }
   });
   const r = el.querySelector('[data-fm-reset]');
-  if (r) r.onclick = () => { delete c.amounts[key]; if (!Object.keys(c.amounts).length) delete c.amounts; commit(['fixedCosts']); closeSheet(); toast('Voltou ao valor padrão'); };
-  el.querySelector('[data-fm-default]').onclick = () => { closeSheet(); editItem('fixedCosts', c.id); };
+  if (r) r.onclick = () => { delete c.amounts[key]; if (!Object.keys(c.amounts).length) delete c.amounts; commit([lkey]); closeSheet(); toast('Voltou ao valor padrão'); };
+  el.querySelector('[data-fm-default]').onclick = () => { closeSheet(); editItem(lkey, c.id); };
+  focusAmount(el);
+}
+
+// ---------- edição rápida: tocar no valor ----------
+function focusAmount(el) { setTimeout(() => { const a = el.querySelector('[data-k]'); if (a) { try { a.focus(); a.select(); } catch {} } }, 280); }
+const amtBtn = (q, value, cls = '', small = '') => `<button type="button" class="amt num amt-edit${small ? ' stack' : ''}${cls ? ' ' + cls : ''}" data-qamt="${esc(q)}" aria-label="Alterar valor"><span class="amt-v">${value}${ic('pencil')}</span>${small}</button>`;
+function fullEdit(key, id) {
+  const it = (D()[key] || []).find(x => String(x.id) === String(id)); if (!it) return;
+  if ((key === 'earnings' || key === 'variableExpenses') && it.simple) return simpleForm(key === 'earnings' ? 'in' : 'out', id);
+  editItem(key, id);
+}
+function quickAmount(key, id, m = S.m, y = S.y) {
+  if (key === 'fixedCosts' || key === 'fixedIncome') return editFixedMonth(id, m, y, key);
+  if (key === 'cardExpenses') return editCardExpense(id);
+  const it = (D()[key] || []).find(x => String(x.id) === String(id)); if (!it) return;
+  const isDebt = key === 'debts' || key === 'debtsReceivable', negPaid = key === 'negatives' && it.paid;
+  const field = isDebt ? 'totalAmount' : negPaid ? 'paidAmount' : 'amount';
+  const n = it.installments || 1;
+  const labels = { earnings: 'Valor da entrada', variableExpenses: 'Valor do gasto', investments: 'Valor do aporte', debts: 'Valor total da dívida', debtsReceivable: 'Valor total a receber', negatives: negPaid ? 'Valor pago' : 'Valor da dívida', priorities: 'Valor estimado' };
+  const cur = field === 'paidAmount' ? num(it.paidAmount ?? it.amount) : num(it[field]);
+  const el = openForm({
+    title: it.description || it.name || (SCHEMA[key] ? SCHEMA[key].title : 'Valor'),
+    fields: [{ k: 'v', label: labels[key] || 'Valor', type: 'money', req: 1, full: 1, hint: isDebt && n > 1 ? `Dividido em ${n} parcelas (hoje ${fmt(cur / n)} cada)` : '' }],
+    values: { v: cur },
+    extra: `<button type="button" class="btn ghost sm" style="margin-top:12px" data-qa-full>${ic('pencil')} Editar tudo (nome, data…)</button>`,
+    onSave: v => { it[field] = num(v.v); commit([key]); toast('Valor atualizado'); }
+  });
+  el.querySelector('[data-qa-full]').onclick = () => { closeSheet(); fullEdit(key, id); };
+  focusAmount(el);
 }
 
 // ---------- compras no cartão ----------
@@ -762,16 +792,16 @@ function quickAdd(type) {
 function details(kind) {
   const c = C();
   let title = '', items = [], total = 0;
-  const L = (desc, sub, amount, tone = '', extra = null) => ({ desc, sub, amount, tone, extra });
+  const L = (desc, sub, amount, tone = '', extra = null, q = '') => ({ desc, sub, amount, tone, extra, q });
   switch (kind) {
     case 'entradas':
       title = 'Entradas do mês';
-      c.fixedIncomeMonth.forEach(i => items.push(L(i.description, 'Renda fixa mensal', i.amount, 'pos')));
-      c.earningsMonth.forEach(i => items.push(L(i.description, fmtDate(i.date), i.amount, 'pos')));
-      c.receivables.filter(r => r.isPaid).forEach(r => items.push(L(`${r.name} (${r.label})`, 'Recebido', r.amount, 'pos')));
+      c.fixedIncomeMonth.forEach(i => items.push(L(i.description, fixedOver(i, S.m, S.y) ? 'Renda fixa · valor do mês' : 'Renda fixa mensal', fixedAmt(i, S.m, S.y), 'pos', null, `fixedIncome|${i.id}|${S.m}|${S.y}`)));
+      c.earningsMonth.forEach(i => items.push(L(i.description, fmtDate(i.date), i.amount, 'pos', null, `earnings|${i.id}`)));
+      c.receivables.filter(r => r.isPaid).forEach(r => items.push(L(`${r.name} (${r.label})`, 'Recebido', r.amount, 'pos', null, `debtsReceivable|${r.id}`)));
       total = c.income; break;
     case 'saidas':
-      title = 'Saídas do mês'; items = c.outflows.map(o => L(o.desc, o.sub, o.amount, o.tone === 'red' ? 'neg' : '', o.pay ? { pay: o.pay } : null)); total = c.expenses; break;
+      title = 'Saídas do mês'; items = c.outflows.map(o => L(o.desc, o.sub, o.amount, o.tone === 'red' ? 'neg' : '', o.pay ? { pay: o.pay } : null, o.q || '')); total = c.expenses; break;
     case 'restante':
       { const ci = carryIn(S.m, S.y);
         title = ci ? 'Saldo acumulado' : 'Saldo do mês';
@@ -780,17 +810,17 @@ function details(kind) {
         total = (ci ? ci.prev : 0) + monthResult(c); }
       break;
     case 'compromisso':
-      title = 'Contas fixas (só as que se repetem todo mês)'; items = c.payables.filter(p => p.type === 'fixed').map(p => L(p.name, `Vence dia ${p.day}${p.isPaid ? ' · paga' : ''}`, p.amount)); total = c.fixedTotal; break;
+      title = 'Contas fixas (só as que se repetem todo mês)'; items = c.payables.filter(p => p.type === 'fixed').map(p => L(p.name, `Vence dia ${p.day}${p.isPaid ? ' · paga' : ''}`, p.amount, '', null, `fixedCosts|${p.id}|${p.tM}|${p.tY}`)); total = c.fixedTotal; break;
     case 'invest':
       title = 'Patrimônio acumulado';
       const end = new Date(S.y, S.m + 1, 0);
       D().investments.filter(i => i.date && new Date(...(p => [p[0], p[1] - 1, p[2]])(parts(i.date))) <= end).sort((a, b) => b.date.localeCompare(a.date))
-        .forEach(i => { items.push(L(i.name, `${i.category || ''}${i.rate ? ' · ' + i.rate : ''} · ${fmtDate(i.date)}`, i.amount)); total += num(i.amount); });
+        .forEach(i => { items.push(L(i.name, `${i.category || ''}${i.rate ? ' · ' + i.rate : ''} · ${fmtDate(i.date)}`, i.amount, '', null, `investments|${i.id}`)); total += num(i.amount); });
       break;
     case 'fatura':
       title = 'Faturas do mês'; c.invoices.filter(i => i.items.length).forEach(i => items.push(L(`Fatura ${i.card.name}`, `Vence ${pad(i.card.dueDay)}/${pad(S.m + 1)} · ${i.paid ? 'paga' : 'em aberto'}`, i.total, i.paid ? 'pos' : ''))); total = c.cardsDue; break;
     case 'vencido':
-      title = 'Contas vencidas'; items = c.overdue.map(o => L(o.name, o.kind, o.amount, 'neg')); total = c.overdueTotal; break;
+      title = 'Contas vencidas'; items = c.overdue.map(o => L(o.name, o.kind, o.amount, 'neg', null, `fixedCosts|${o.id}|${o.tM}|${o.tY}`)); total = c.overdueTotal; break;
     case 'percent':
       title = '% da renda comprometida'; items = [L('Contas fixas do mês', '', c.fixedTotal)].concat(percentWithCards() ? [L('Faturas de cartão do mês', '', c.cardsDue)] : []).concat([L('Total de entradas', '', c.income, 'pos')]); total = null; break;
     case 'monthlyTotal': {
@@ -801,11 +831,11 @@ function details(kind) {
       total = c.monthlyTotal; break;
     }
     case 'negativados':
-      title = 'Contas negativadas em aberto'; items = D().negatives.filter(n => !n.paid).map(n => L(n.description, n.contractDate ? `Contrato de ${fmtDate(n.contractDate)}` : '', n.amount, 'neg')); total = c.negTotal; break;
+      title = 'Contas negativadas em aberto'; items = D().negatives.filter(n => !n.paid).map(n => L(n.description, n.contractDate ? `Contrato de ${fmtDate(n.contractDate)}` : '', n.amount, 'neg', null, `negatives|${n.id}`)); total = c.negTotal; break;
     case 'prioridades':
-      title = 'Prioridades e desejos'; items = D().priorities.map(p => L(p.description, `Prioridade ${p.level}`, p.amount)); total = c.priTotal; break;
+      title = 'Prioridades e desejos'; items = D().priorities.map(p => L(p.description, `Prioridade ${p.level}`, p.amount, '', null, `priorities|${p.id}`)); total = c.priTotal; break;
   }
-  const body = `<div class="list">${items.length ? items.map((it, i) => `<div class="row"><div class="grow"><div class="t">${esc(it.desc)}</div>${it.sub ? `<div class="s">${esc(it.sub)}</div>` : ''}</div><div class="amt num ${it.tone}">${fmt(it.amount)}</div>${it.extra && it.extra.pay ? `<button class="icon-btn" title="Desfazer pagamento" data-undo="${i}">${ic('undo')}</button>` : ''}</div>`).join('') : `<div class="empty">Nada por aqui neste mês.</div>`}</div>`;
+  const body = `<div class="list" data-dsheet>${items.length ? items.map((it, i) => `<div class="row"><div class="grow"><div class="t">${esc(it.desc)}</div>${it.sub ? `<div class="s">${esc(it.sub)}</div>` : ''}</div>${it.q ? amtBtn(it.q, fmt(it.amount), it.tone) : `<div class="amt num ${it.tone}">${fmt(it.amount)}</div>`}${it.extra && it.extra.pay ? `<button class="icon-btn" title="Desfazer pagamento" data-undo="${i}">${ic('undo')}</button>` : ''}</div>`).join('') : `<div class="empty">Nada por aqui neste mês.</div>`}</div>`;
   const foot = total === null ? `<div class="grow"><b style="font-size:20px" class="num">${c.percent.toFixed(1)}%</b> <span class="muted">da renda vai para contas fixas${percentWithCards() ? ' e cartões' : ''}</span><div class="muted" style="font-size:12px;margin-top:4px">${percentWithCards() ? 'Faturas de cartão incluídas' : 'Faturas de cartão não incluídas'} · altere em Ajustes</div></div>` : `<div class="grow muted">Total</div><b class="num" style="font-size:19px">${fmt(total)}</b>`;
   openSheet({
     title: `${title} · ${MONTHS[S.m]}`, body, foot,
@@ -848,7 +878,7 @@ const vis = k => D().settings.visibleCards[k] !== false;
 function payRow(p, opts = {}) {
   const cls = `row${p.isPaid ? ' paid' : ''}${(p.late || p.overdue) && !p.isPaid ? ' late' : ''}`;
   const sub = p.overdue ? p.kind : `${p.kind} · ${p.late && !p.isPaid ? 'venceu' : 'vence'} dia ${p.day}`;
-  return `<div class="${cls}"><input type="checkbox" class="check" aria-label="Marcar como pago" data-pay="${esc(p.type)}" data-id="${esc(p.id)}" data-tm="${p.tM}" data-ty="${p.tY}"${p.isPaid ? ' checked' : ''}><span class="dot-c" style="background:${p.color}"></span><div class="grow"${opts.edit !== false ? ` data-openpay="${esc(p.type)}" data-id="${esc(p.id)}" style="cursor:pointer"` : ''}><div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></div>${p.type === 'fixed' ? `<button class="amt num amt-edit" data-famt="${esc(p.id)}" data-tm="${p.tM}" data-ty="${p.tY}" aria-label="Alterar valor deste mês">${fmt(p.amount)}${ic('pencil')}</button>` : `<div class="amt num">${fmt(p.amount)}</div>`}</div>`;
+  return `<div class="${cls}"><input type="checkbox" class="check" aria-label="Marcar como pago" data-pay="${esc(p.type)}" data-id="${esc(p.id)}" data-tm="${p.tM}" data-ty="${p.tY}"${p.isPaid ? ' checked' : ''}><span class="dot-c" style="background:${p.color}"></span><div class="grow"${opts.edit !== false ? ` data-openpay="${esc(p.type)}" data-id="${esc(p.id)}" style="cursor:pointer"` : ''}><div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></div>${p.type === 'fixed' ? amtBtn(`fixedCosts|${p.id}|${p.tM}|${p.tY}`, fmt(p.amount)) : p.type === 'variable' ? amtBtn(`variableExpenses|${p.id}`, fmt(p.amount)) : p.type === 'debt_installment' ? amtBtn(`debts|${p.id}`, fmt(p.amount)) : `<div class="amt num">${fmt(p.amount)}</div>`}</div>`;
 }
 function emptyBox(icon, text, btn) { return `<div class="empty"><div class="ei">${ic(icon)}</div>${text}${btn ? `<div style="margin-top:12px">${btn}</div>` : ''}</div>`; }
 function kpi(key, icon, tone, value, valCls = '') {
@@ -915,9 +945,9 @@ function viewInicio() {
   if (vis('formQuickAdd')) right.push(quickCard());
   if (vis('tableEarnings')) {
     const rows = [];
-    c.fixedIncomeMonth.forEach(i => rows.push(`<div class="row click" data-edit="fixedIncome" data-id="${esc(i.id)}"><span class="ico-c tone-green">${ic('repeat')}</span><div class="grow"><div class="t">${esc(i.description)}</div><div class="s">Renda fixa</div></div><div class="amt num pos">${fmt(i.amount)}</div></div>`));
-    c.earningsMonth.forEach(i => rows.push(`<div class="row click" data-edit="earnings" data-id="${esc(i.id)}"><span class="ico-c tone-green">${ic('down')}</span><div class="grow"><div class="t">${esc(i.description)}</div><div class="s">Extra · ${fmtDate(i.date)}</div></div><div class="amt num pos">${fmt(i.amount)}</div></div>`));
-    c.receivables.forEach(r => rows.push(`<div class="row${r.isPaid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="receivable_installment" data-id="${esc(r.id)}" data-tm="${S.m}" data-ty="${S.y}"${r.isPaid ? ' checked' : ''} aria-label="Marcar como recebido"><div class="grow"><div class="t">${esc(r.name)} (${r.label})</div><div class="s">A receber</div></div><div class="amt num ${r.isPaid ? 'pos' : 'muted'}">${fmt(r.amount)}</div></div>`));
+    c.fixedIncomeMonth.forEach(i => rows.push(`<div class="row click" data-edit="fixedIncome" data-id="${esc(i.id)}"><span class="ico-c tone-green">${ic('repeat')}</span><div class="grow"><div class="t">${esc(i.description)}</div><div class="s">Renda fixa${fixedOver(i, S.m, S.y) ? ' · valor do mês' : ''}</div></div>${amtBtn(`fixedIncome|${i.id}|${S.m}|${S.y}`, fmt(fixedAmt(i, S.m, S.y)), 'pos')}</div>`));
+    c.earningsMonth.forEach(i => rows.push(`<div class="row click" data-edit="earnings" data-id="${esc(i.id)}"><span class="ico-c tone-green">${ic('down')}</span><div class="grow"><div class="t">${esc(i.description)}</div><div class="s">Extra · ${fmtDate(i.date)}</div></div>${amtBtn(`earnings|${i.id}`, fmt(i.amount), 'pos')}</div>`));
+    c.receivables.forEach(r => rows.push(`<div class="row${r.isPaid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="receivable_installment" data-id="${esc(r.id)}" data-tm="${S.m}" data-ty="${S.y}"${r.isPaid ? ' checked' : ''} aria-label="Marcar como recebido"><div class="grow"><div class="t">${esc(r.name)} (${r.label})</div><div class="s">A receber</div></div>${amtBtn(`debtsReceivable|${r.id}`, fmt(r.amount), r.isPaid ? 'pos' : 'muted')}</div>`));
     right.push(`<div class="card"><div class="card-head"><h3>Entradas e recebíveis</h3><button class="btn ghost sm" data-goto="entradas">Ver</button></div><div class="card-body"><div class="list">${rows.length ? rows.join('') : emptyBox('down', 'Nenhuma entrada neste mês.', `<button class="btn sm" data-act="new" data-key="fixedIncome">${ic('plus')} Cadastrar renda</button>`)}</div></div></div>`);
   }
   if (vis('tableInvest')) right.push(`<div class="card"><div class="card-head"><h3>Investimentos do mês</h3><span class="sub num">${fmt(c.investTotal)}</span></div><div class="card-body"><div class="list">${c.investMonth.length ? c.investMonth.map(investRow).join('') : emptyBox('trend', 'Nenhum aporte neste mês.')}</div></div></div>`);
@@ -936,7 +966,7 @@ function quickCard() {
     </form></div></div>`;
 }
 function investRow(i) {
-  return `<div class="row click" data-edit="investments" data-id="${esc(i.id)}"><span class="ico-c tone-primary">${ic('trend')}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.category === 'Crypto' ? 'Cripto' : (i.category || ''))}${i.rate ? ' · ' + esc(i.rate) : ''} · ${fmtDate(i.date)}</div></div><div class="amt num" style="color:var(--blue)">${fmt(i.amount)}</div></div>`;
+  return `<div class="row click" data-edit="investments" data-id="${esc(i.id)}"><span class="ico-c tone-primary">${ic('trend')}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.category === 'Crypto' ? 'Cripto' : (i.category || ''))}${i.rate ? ' · ' + esc(i.rate) : ''} · ${fmtDate(i.date)}</div></div>${amtBtn(`investments|${i.id}`, fmt(i.amount), 'inv')}</div>`;
 }
 
 function viewContas() {
@@ -957,9 +987,9 @@ function listCard(title, sub, rows, addKey, addLabel, emptyIcon, emptyText) {
 function viewEntradas() {
   const c = C();
   const fiSub = i => i.startDate || i.endDate ? `${i.startDate ? 'Desde ' + fmtDate(i.startDate) : 'Todo mês'}${i.endDate ? ' até ' + fmtDate(i.endDate) : ''}` : 'Todo mês';
-  const fixed = D().fixedIncome.map(i => { const on = fixedActive(i, S.m, S.y); return `<div class="row click" data-edit="fixedIncome" data-id="${esc(i.id)}"><span class="ico-c tone-${on ? 'green' : 'blue'}">${ic('repeat')}</span><div class="grow"><div class="t">${esc(i.description)}</div><div class="s">${fiSub(i)}${on ? '' : ' · não conta neste mês'}</div></div><div class="amt num ${on ? 'pos' : 'muted'}">${fmt(i.amount)}</div></div>`; });
-  const extra = c.earningsMonth.slice().sort((a, b) => a.date.localeCompare(b.date)).map(i => `<div class="row click" data-edit="earnings" data-id="${esc(i.id)}"><span class="ico-c tone-green">${ic('down')}</span><div class="grow"><div class="t">${esc(i.description)}</div><div class="s">${fmtDate(i.date)}</div></div><div class="amt num pos">${fmt(i.amount)}</div></div>`);
-  const rec = c.receivables.map(r => `<div class="row${r.isPaid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="receivable_installment" data-id="${esc(r.id)}" data-tm="${S.m}" data-ty="${S.y}"${r.isPaid ? ' checked' : ''} aria-label="Marcar como recebido"><div class="grow"><div class="t">${esc(r.name)} (${r.label})</div><div class="s">Parcela a receber</div></div><div class="amt num">${fmt(r.amount)}</div></div>`);
+  const fixed = D().fixedIncome.map(i => { const on = fixedActive(i, S.m, S.y); return `<div class="row click" data-edit="fixedIncome" data-id="${esc(i.id)}"><span class="ico-c tone-${on ? 'green' : 'blue'}">${ic('repeat')}</span><div class="grow"><div class="t">${esc(i.description)}</div><div class="s">${fiSub(i)}${on ? (fixedOver(i, S.m, S.y) ? ' · valor do mês' : '') : ' · não conta neste mês'}</div></div>${on ? amtBtn(`fixedIncome|${i.id}|${S.m}|${S.y}`, fmt(fixedAmt(i, S.m, S.y)), 'pos') : `<div class="amt num muted">${fmt(i.amount)}</div>`}</div>`; });
+  const extra = c.earningsMonth.slice().sort((a, b) => a.date.localeCompare(b.date)).map(i => `<div class="row click" data-edit="earnings" data-id="${esc(i.id)}"><span class="ico-c tone-green">${ic('down')}</span><div class="grow"><div class="t">${esc(i.description)}</div><div class="s">${fmtDate(i.date)}</div></div>${amtBtn(`earnings|${i.id}`, fmt(i.amount), 'pos')}</div>`);
+  const rec = c.receivables.map(r => `<div class="row${r.isPaid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="receivable_installment" data-id="${esc(r.id)}" data-tm="${S.m}" data-ty="${S.y}"${r.isPaid ? ' checked' : ''} aria-label="Marcar como recebido"><div class="grow"><div class="t">${esc(r.name)} (${r.label})</div><div class="s">Parcela a receber</div></div>${amtBtn(`debtsReceivable|${r.id}`, fmt(r.amount))}</div>`);
   return `<div class="stats"><div class="card stat"><span>Total de entradas</span><b class="num pos">${fmt(c.income)}</b></div><div class="card stat"><span>Renda fixa</span><b class="num">${fmt(c.fixedIncomeTotal)}</b></div><div class="card stat"><span>Extras no mês</span><b class="num">${fmt(c.earningsMonth.reduce((s, x) => s + num(x.amount), 0))}</b></div></div>
   <div class="grid">${listCard('Renda fixa', 'Entra todo mês automaticamente', fixed, 'fixedIncome', 'Adicionar', 'repeat', 'Cadastre seu salário ou outras rendas mensais.')}
   ${listCard(`Entradas extras de ${MONTHS[S.m].toLowerCase()}`, 'Comissões, freelas, vendas…', extra, 'earnings', 'Nova entrada', 'down', 'Nenhuma entrada extra neste mês.')}
@@ -969,7 +999,7 @@ function viewFixas() {
   const c = C();
   const active = D().fixedCosts.filter(x => fixedActive(x, S.m, S.y)).sort((a, b) => num(a.dueDay) - num(b.dueDay));
   const inactive = D().fixedCosts.filter(x => !fixedActive(x, S.m, S.y));
-  const row = x => { const paid = isPaid('fixed', x.id, S.m, S.y); return `<div class="row${paid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="fixed" data-id="${esc(x.id)}" data-tm="${S.m}" data-ty="${S.y}"${paid ? ' checked' : ''} aria-label="Marcar como pago"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow" data-edit="fixedCosts" data-id="${esc(x.id)}" style="cursor:pointer"><div class="t">${esc(x.name)}</div><div class="s">Vence dia ${esc(x.dueDay)} · desde ${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}${fixedOver(x, S.m, S.y) ? ' · valor do mês' : ''}</div></div><button class="amt num amt-edit" data-famt="${esc(x.id)}" data-tm="${S.m}" data-ty="${S.y}" aria-label="Alterar valor deste mês">${fmt(fixedAmt(x, S.m, S.y))}${ic('pencil')}</button></div>`; };
+  const row = x => { const paid = isPaid('fixed', x.id, S.m, S.y); return `<div class="row${paid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="fixed" data-id="${esc(x.id)}" data-tm="${S.m}" data-ty="${S.y}"${paid ? ' checked' : ''} aria-label="Marcar como pago"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow" data-edit="fixedCosts" data-id="${esc(x.id)}" style="cursor:pointer"><div class="t">${esc(x.name)}</div><div class="s">Vence dia ${esc(x.dueDay)} · desde ${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}${fixedOver(x, S.m, S.y) ? ' · valor do mês' : ''}</div></div>${amtBtn(`fixedCosts|${x.id}|${S.m}|${S.y}`, fmt(fixedAmt(x, S.m, S.y)))}</div>`; };
   const paidV = active.filter(x => isPaid('fixed', x.id, S.m, S.y)).reduce((s, x) => s + fixedAmt(x, S.m, S.y), 0);
   return `<div class="stats"><div class="card stat"><span>Total fixo do mês</span><b class="num">${fmt(c.fixedTotal)}</b></div><div class="card stat"><span>Pago</span><b class="num pos">${fmt(paidV)}</b></div><div class="card stat"><span>% da renda</span><b class="num">${c.percent.toFixed(1)}%</b></div></div>
   <div class="grid">${listCard(`Contas de ${MONTHS[S.m].toLowerCase()}`, 'Toque no nome para editar', active.map(row), 'fixedCosts', 'Nova conta', 'repeat', 'Nenhuma conta fixa ativa neste mês.')}
@@ -980,7 +1010,7 @@ function viewGastos() {
   const items = c.varMonth.slice().sort((a, b) => b.date.localeCompare(a.date));
   const paid = items.filter(v => isPaid('variable', v.id, S.m, S.y)).reduce((s, x) => s + num(x.amount), 0);
   const total = items.reduce((s, x) => s + num(x.amount), 0);
-  const rows = items.map(v => { const p = isPaid('variable', v.id, S.m, S.y); return `<div class="row${p ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="variable" data-id="${esc(v.id)}" data-tm="${S.m}" data-ty="${S.y}"${p ? ' checked' : ''} aria-label="Marcar como pago"><div class="grow" data-edit="variableExpenses" data-id="${esc(v.id)}" style="cursor:pointer"><div class="t">${esc(v.description || v.category)}</div><div class="s"><span class="dot-c" style="display:inline-block;width:8px;height:8px;background:${catColor(v.category)};margin-right:5px"></span>${esc(v.category)} · ${fmtDate(v.date)}</div></div><div class="amt num">${fmt(v.amount)}</div></div>`; });
+  const rows = items.map(v => { const p = isPaid('variable', v.id, S.m, S.y); return `<div class="row${p ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="variable" data-id="${esc(v.id)}" data-tm="${S.m}" data-ty="${S.y}"${p ? ' checked' : ''} aria-label="Marcar como pago"><div class="grow" data-edit="variableExpenses" data-id="${esc(v.id)}" style="cursor:pointer"><div class="t">${esc(v.description || v.category)}</div><div class="s"><span class="dot-c" style="display:inline-block;width:8px;height:8px;background:${catColor(v.category)};margin-right:5px"></span>${esc(v.category)} · ${fmtDate(v.date)}</div></div>${amtBtn(`variableExpenses|${v.id}`, fmt(v.amount))}</div>`; });
   return `<div class="stats"><div class="card stat"><span>Gastos do mês</span><b class="num">${fmt(total)}</b></div><div class="card stat"><span>Pagos</span><b class="num pos">${fmt(paid)}</b></div><div class="card stat"><span>Pendentes</span><b class="num">${fmt(total - paid)}</b></div></div>
   <div class="home-grid" style="margin-top:0">${listCard(`Gastos de ${MONTHS[S.m].toLowerCase()}`, 'Toque para editar', rows, 'variableExpenses', 'Novo gasto', 'cart', 'Nenhum gasto lançado neste mês.')}
   <div class="grid" style="align-content:start"><div class="card"><div class="card-head"><h3>Por categoria</h3><button class="btn ghost sm" data-act="cats">${ic('tag')} Categorias</button></div><div class="card-body">${catBars(c.catTotals, 20)}</div></div></div></div>`;
@@ -1001,7 +1031,7 @@ function viewCartoes() {
   }).join('');
   const invs = c.invoices.filter(i => i.items.length).map(i => `<div class="card"><div class="card-head"><div><h3>Fatura ${esc(i.card.name)}</h3><div class="sub">Vence ${pad(i.card.dueDay)}/${pad(S.m + 1)}/${S.y} · ${i.items.length} lançamento(s)</div></div>
     <label class="switch" style="padding:7px 10px"><span style="font-size:13px">${i.paid ? 'Paga' : 'Marcar paga'}</span><input type="checkbox" data-pay="card_invoice" data-id="${esc(i.id)}" data-tm="${S.m}" data-ty="${S.y}"${i.paid ? ' checked' : ''}></label></div>
-    <div class="card-body"><div class="list">${i.items.map(e => `<div class="row click" data-cexp="${esc(e.id)}"><div class="grow"><div class="t">${esc(e.description || 'Compra')}</div><div class="s">Parcela ${esc(e.installmentLabel || '1/1')}${e.purchaseDate ? ' · ' + fmtDate(e.purchaseDate) : ''}</div></div><div class="amt num">${fmt(e.amount)}</div></div>`).join('')}</div>
+    <div class="card-body"><div class="list">${i.items.map(e => `<div class="row click" data-cexp="${esc(e.id)}"><div class="grow"><div class="t">${esc(e.description || 'Compra')}</div><div class="s">Parcela ${esc(e.installmentLabel || '1/1')}${e.purchaseDate ? ' · ' + fmtDate(e.purchaseDate) : ''}</div></div>${amtBtn(`cardExpenses|${e.id}`, fmt(e.amount))}</div>`).join('')}</div>
     <div class="row" style="border-top:1px solid var(--border);margin-top:4px"><div class="grow"><b>Total</b></div><b class="num" style="font-size:16px">${fmt(i.total)}</b></div></div></div>`).join('');
   return `<div class="toolbar"><button class="btn primary" data-act="cardbuy">${ic('plus')} Nova compra no cartão</button></div>
     <div class="cc-grid">${ccs}<button class="cc-add" data-act="new" data-key="cards"><span>${ic('plus')}<br>Cadastrar cartão</span></button></div>
@@ -1031,7 +1061,7 @@ function debtRow(x, key) {
     <div class="grow" data-edit="${key}" data-id="${esc(x.id)}" style="cursor:pointer"><div class="t">${esc(x.name || '—')}</div>
     <div class="s">${n}x de ${fmt(each)} · ${cur ? `parcela ${diff + 1}/${n} neste mês` : diff < 0 ? 'começa em ' + fmtDate(x.date) : 'parcelas encerradas'}</div>
     <div style="display:flex;align-items:center;gap:10px;margin-top:8px"><div class="progress" style="flex:1"><i style="width:${Math.min(100, paidCount / n * 100)}%;background:${key === 'debts' ? 'var(--red)' : 'var(--green)'}"></i></div><span class="muted" style="font-size:12px;white-space:nowrap">${Math.min(paidCount, n)}/${n} ${key === 'debts' ? 'pagas' : 'recebidas'}</span></div></div>
-    <div class="amt num">${fmt(x.totalAmount)}<small>${done ? 'quitado' : 'falta ' + fmt(remain)}</small></div></div>`;
+    ${amtBtn(`${key}|${x.id}`, fmt(x.totalAmount), '', `<small>${done ? 'quitado' : 'falta ' + fmt(remain)}</small>`)}</div>`;
 }
 function viewDividas() {
   const t = S.ui.debtTab, key = t === 'pagar' ? 'debts' : 'debtsReceivable', list = D()[key];
@@ -1045,7 +1075,7 @@ function viewDividas() {
 function viewNegativados() {
   const open = D().negatives.filter(n => !n.paid), done = D().negatives.filter(n => n.paid).sort((a, b) => String(b.paidDate).localeCompare(String(a.paidDate)));
   const paidSum = done.reduce((s, n) => s + num(n.paidAmount ?? n.amount), 0);
-  const row = n => `<div class="row${n.paid ? ' paid' : ''}"><input type="checkbox" class="check" data-negpay="${esc(n.id)}"${n.paid ? ' checked' : ''} aria-label="Marcar como quitado"><div class="grow" data-edit="negatives" data-id="${esc(n.id)}" style="cursor:pointer"><div class="t">${esc(n.description)}</div><div class="s">${n.paid ? `Quitado em ${fmtDate(n.paidDate)}` : (n.contractDate ? 'Contrato de ' + fmtDate(n.contractDate) : '—')}</div></div><div class="amt num ${n.paid ? 'pos' : 'neg'}">${fmt(n.paid ? (n.paidAmount ?? n.amount) : n.amount)}${n.paid && num(n.paidAmount ?? n.amount) < num(n.amount) ? `<small>de ${fmt(n.amount)}</small>` : ''}</div></div>`;
+  const row = n => `<div class="row${n.paid ? ' paid' : ''}"><input type="checkbox" class="check" data-negpay="${esc(n.id)}"${n.paid ? ' checked' : ''} aria-label="Marcar como quitado"><div class="grow" data-edit="negatives" data-id="${esc(n.id)}" style="cursor:pointer"><div class="t">${esc(n.description)}</div><div class="s">${n.paid ? `Quitado em ${fmtDate(n.paidDate)}` : (n.contractDate ? 'Contrato de ' + fmtDate(n.contractDate) : '—')}</div></div>${amtBtn(`negatives|${n.id}`, fmt(n.paid ? (n.paidAmount ?? n.amount) : n.amount), n.paid ? 'pos' : 'neg', n.paid && num(n.paidAmount ?? n.amount) < num(n.amount) ? `<small>de ${fmt(n.amount)}</small>` : '')}</div>`;
   return `<div class="stats"><div class="card stat"><span>Em aberto</span><b class="num ${C().negTotal ? 'neg' : ''}">${fmt(C().negTotal)}</b></div><div class="card stat"><span>Já quitado</span><b class="num pos">${fmt(paidSum)}</b></div><div class="card stat"><span>Contas</span><b class="num">${open.length} aberta(s) · ${done.length} quitada(s)</b></div></div>
   <div class="grid">${listCard('Contas negativadas (Serasa/SPC)', 'Marque a caixinha quando quitar', open.map(row), 'negatives', 'Novo item', 'shield', done.length ? 'Nenhuma conta em aberto. Parabéns! 🎉' : 'Nenhuma conta negativada. 👏')}
   ${done.length ? listCard('Quitadas', 'Histórico do que você já resolveu', done.map(row), null, '', 'check', '') : ''}</div>`;
@@ -1063,7 +1093,7 @@ function viewPrioridades() {
   const order = { Alta: 0, 'Média': 1, Baixa: 2 }, tone = { Alta: 'red', 'Média': 'amber', Baixa: 'blue' };
   const list = D().priorities.slice().sort((a, b) => (order[a.level] ?? 3) - (order[b.level] ?? 3));
   return `<div class="stats"><div class="card stat"><span>Total estimado</span><b class="num">${fmt(C().priTotal)}</b></div>${LEVELS.map(l => `<div class="card stat"><span>Prioridade ${l.toLowerCase()}</span><b class="num">${fmt(list.filter(x => x.level === l).reduce((s, x) => s + num(x.amount), 0))}</b></div>`).slice(0, 2).join('')}</div>
-  ${listCard('Lista de prioridades e desejos', 'O que você quer comprar ou resolver', list.map(p => `<div class="row click" data-edit="priorities" data-id="${esc(p.id)}"><span class="ico-c tone-${tone[p.level] || 'blue'}">${ic('star')}</span><div class="grow"><div class="t">${esc(p.description)}</div><div class="s"><span class="chip ${tone[p.level] || ''}">${esc(p.level)}</span></div></div><div class="amt num">${fmt(p.amount)}</div></div>`), 'priorities', 'Nova prioridade', 'star', 'Sua lista está vazia.')}`;
+  ${listCard('Lista de prioridades e desejos', 'O que você quer comprar ou resolver', list.map(p => `<div class="row click" data-edit="priorities" data-id="${esc(p.id)}"><span class="ico-c tone-${tone[p.level] || 'blue'}">${ic('star')}</span><div class="grow"><div class="t">${esc(p.description)}</div><div class="s"><span class="chip ${tone[p.level] || ''}">${esc(p.level)}</span></div></div>${amtBtn(`priorities|${p.id}`, fmt(p.amount))}</div>`), 'priorities', 'Nova prioridade', 'star', 'Sua lista está vazia.')}`;
 }
 function viewAjustes() {
   const theme = lsGet('financas.theme') || 'auto';
@@ -1093,7 +1123,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.9.1</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.10</p></div>`;
 }
 
 // ---------- modo simplificado ----------
@@ -1111,10 +1141,10 @@ function setMode(simple) {
 function simpleMoves(m, y) {
   const c = calcM(m, y), last = new Date(y, m + 1, 0).getDate(), first = `${y}-${pad(m + 1)}-01`, list = [];
   const inM = s => (s && inMonth(s, m, y) ? s : first);
-  c.fixedIncomeMonth.forEach(i => list.push({ dir: 'in', date: first, desc: i.description || 'Renda fixa', sub: 'Renda fixa · todo mês', amount: num(i.amount), edit: ['fixedIncome', i.id] }));
-  c.earningsMonth.forEach(i => list.push({ dir: 'in', date: i.date, desc: i.description || 'Entrada', amount: num(i.amount), simple: ['earnings', i.id] }));
-  c.receivables.filter(r => r.isPaid).forEach(r => list.push({ dir: 'in', date: `${y}-${pad(m + 1)}-${pad(Math.min(r.day, last))}`, desc: `${r.name} (${r.label})`, sub: 'Valor recebido', amount: r.amount }));
-  c.outflows.forEach(o => list.push({ dir: 'out', date: inM(o.date), desc: o.desc || 'Saída', sub: o.simple ? '' : o.sub, amount: o.amount, simple: o.simple, edit: o.edit }));
+  c.fixedIncomeMonth.forEach(i => list.push({ dir: 'in', date: first, desc: i.description || 'Renda fixa', sub: fixedOver(i, m, y) ? 'Renda fixa · valor do mês' : 'Renda fixa · todo mês', amount: fixedAmt(i, m, y), edit: ['fixedIncome', i.id], q: `fixedIncome|${i.id}|${m}|${y}` }));
+  c.earningsMonth.forEach(i => list.push({ dir: 'in', date: i.date, desc: i.description || 'Entrada', amount: num(i.amount), simple: ['earnings', i.id], q: `earnings|${i.id}` }));
+  c.receivables.filter(r => r.isPaid).forEach(r => list.push({ dir: 'in', date: `${y}-${pad(m + 1)}-${pad(Math.min(r.day, last))}`, desc: `${r.name} (${r.label})`, sub: 'Valor recebido', amount: r.amount, q: `debtsReceivable|${r.id}` }));
+  c.outflows.forEach(o => list.push({ dir: 'out', date: inM(o.date), desc: o.desc || 'Saída', sub: o.simple ? '' : o.sub, amount: o.amount, simple: o.simple, edit: o.edit, q: o.q }));
   return list;
 }
 function dailyChart(moves, m, y) {
@@ -1159,7 +1189,7 @@ function viewSimples() {
     const label = d === today ? 'Hoje' : d === yd ? 'Ontem' : `${pad(dd)}/${pad(mm)}`;
     const rows = items.map(x => {
       const attr = x.simple ? ` data-sedit="${esc(x.simple[0])}|${esc(x.simple[1])}"` : x.edit ? ` data-edit="${esc(x.edit[0])}" data-id="${esc(x.edit[1])}"` : '';
-      return `<div class="row${attr ? ' click' : ''}"${attr}><span class="ico-c tone-${x.dir === 'in' ? 'green' : 'red'}">${ic(x.dir === 'in' ? 'down' : 'up')}</span><div class="grow"><div class="t">${esc(x.desc)}</div>${x.sub ? `<div class="s">${esc(x.sub)}</div>` : ''}</div><div class="amt num ${x.dir === 'in' ? 'pos' : 'neg'}">${x.dir === 'in' ? '+' : '−'} ${fmt(x.amount)}</div></div>`;
+      return `<div class="row${attr ? ' click' : ''}"${attr}><span class="ico-c tone-${x.dir === 'in' ? 'green' : 'red'}">${ic(x.dir === 'in' ? 'down' : 'up')}</span><div class="grow"><div class="t">${esc(x.desc)}</div>${x.sub ? `<div class="s">${esc(x.sub)}</div>` : ''}</div>${x.q ? amtBtn(x.q, `${x.dir === 'in' ? '+' : '−'} ${fmt(x.amount)}`, x.dir === 'in' ? 'pos' : 'neg') : `<div class="amt num ${x.dir === 'in' ? 'pos' : 'neg'}">${x.dir === 'in' ? '+' : '−'} ${fmt(x.amount)}</div>`}</div>`;
     }).join('');
     return `<div class="sday"><div class="sday-head"><div><b>${label}</b><span>${label.includes('/') ? wd : `${pad(dd)}/${pad(mm)} · ${wd}`}</span></div><div class="sday-tot">${tin ? `<span class="pos num">+ ${fmt(tin)}</span>` : ''}${tout ? `<span class="neg num">− ${fmt(tout)}</span>` : ''}</div></div><div class="list">${rows}</div></div>`;
   }).join('');
@@ -1377,9 +1407,10 @@ window.addEventListener('hashchange', route);
 
 // ---------- eventos ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-act],[data-sedit],[data-detail],[data-edit],[data-goto],[data-seg],[data-cexp],[data-openpay],[data-famt],[data-theme-set]');
+  const t = e.target.closest('[data-act],[data-sedit],[data-detail],[data-edit],[data-goto],[data-seg],[data-cexp],[data-openpay],[data-famt],[data-qamt],[data-theme-set]');
   if (!t || !S.ready) return;
   if (t.matches('input')) return;
+  if (t.dataset.qamt) { const [k, id, mm, yy] = t.dataset.qamt.split('|'); if (t.closest('[data-dsheet]')) closeSheet(); return mm != null && mm !== '' ? quickAmount(k, id, +mm, +yy) : quickAmount(k, id); }
   if (t.dataset.sedit) { const [k, id] = t.dataset.sedit.split('|'); return simpleForm(k === 'earnings' ? 'in' : 'out', id); }
   if (t.dataset.detail) return details(t.dataset.detail);
   if (t.dataset.edit) return editItem(t.dataset.edit, t.dataset.id);

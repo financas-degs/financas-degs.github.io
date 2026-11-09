@@ -524,3 +524,17 @@ svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none;
   .sgrid { grid-template-columns: 1fr; }
   .sgrid .schart { order: -1; position: static; }
 }
+/* v1.10: valor editável em todas as listas */
+.row .amt-edit .amt-v { display: inline-flex; align-items: center; gap: 5px; }
+.row .amt-edit.stack { flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; }
+.row .amt-edit.pos { color: var(--green); }
+.row .amt-edit.neg { color: var(--red); }
+.row .amt-edit.muted { color: var(--muted); }
+.row .amt-edit.inv { color: var(--blue); }
+.row .amt-edit:focus-visible { outline: 2px solid var(--primary, #6366f1); outline-offset: 1px; }
+/* grades não crescem além da tela no celular (corrige corte dos valores à direita) */
+.grid { grid-template-columns: minmax(0, 1fr); }
+.home-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .home-grid, .charts-row { grid-template-columns: minmax(0, 1fr); } }
+.sgrid.one { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 900px) { .sgrid { grid-template-columns: minmax(0, 1fr); } }

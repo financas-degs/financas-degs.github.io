@@ -76,6 +76,7 @@ const P = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>'
 };
 const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
@@ -83,7 +84,7 @@ const GOOGLE = '<svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="tru
 const LOGO = '<svg class="brand-logo" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4338ca"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg)"/><path d="M16 42l10-10 7 7 15-15" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="48" cy="24" r="4" fill="#a7f3d0"/></svg>';
 
 // ---------- modelo de dados (compatível com a v14) ----------
-const KEYS = ['fixedIncome','earnings','fixedCosts','categories','variableExpenses','cards','cardExpenses','investments','debts','debtsReceivable','payments','negatives','priorities','settings'];
+const KEYS = ['fixedIncome','earnings','fixedCosts','categories','variableExpenses','cards','cardExpenses','investments','debts','debtsReceivable','payments','negatives','priorities','goals','settings'];
 const CARD_LABELS = {
   entradas: 'Total de entradas', saidas: 'Total de saídas', restante: 'Saldo do mês', compromisso: 'Contas fixas',
   invest: 'Investimentos do mês', fatura: 'Faturas do mês', vencido: 'Total vencido', percent: '% comprometido',
@@ -91,7 +92,7 @@ const CARD_LABELS = {
 };
 const WIDGET_LABELS = {
   chartDonut: 'Gráfico: fluxo de caixa', chartCategory: 'Gráfico: gastos por categoria', chartTrend: 'Gráfico: últimos 6 meses',
-  formQuickAdd: 'Lançamento rápido (computador)', tableFixed: 'Central de contas', tableEarnings: 'Entradas e recebíveis', tableInvest: 'Investimentos do mês'
+  formQuickAdd: 'Lançamento rápido (computador)', tableFixed: 'Central de contas', tableEarnings: 'Entradas e recebíveis', tableInvest: 'Investimentos do mês', goalsCard: 'Metas'
 };
 const INVEST_TYPES = ['Tesouro','CDB','LCI/LCA','Poupança','Ações','FIIs','Crypto','Outros'];
 const LEVELS = ['Alta','Média','Baixa'];
@@ -102,7 +103,7 @@ const defaultData = () => ({
     { name: 'Lazer', color: '#ec4899' }, { name: 'Saúde', color: '#10b981' }, { name: 'Casa', color: '#6366f1' }
   ],
   variableExpenses: [], cards: [], cardExpenses: [], investments: [], debts: [], debtsReceivable: [],
-  payments: [], negatives: [], priorities: [],
+  payments: [], negatives: [], priorities: [], goals: [],
   settings: { visibleCards: Object.fromEntries([...Object.keys(CARD_LABELS), ...Object.keys(WIDGET_LABELS)].map(k => [k, true])) }
 });
 
@@ -117,7 +118,8 @@ function normalize(d) {
   const seen = new Set();
   out.fixedCosts.forEach((c, i) => { if (!c.id || seen.has(c.id)) c.id = 'fix_' + Date.now() + '_' + i; seen.add(c.id); if (!c.startDate) c.startDate = '2024-01'; });
   ensureId(out.variableExpenses, 'var'); ensureId(out.fixedIncome, 'fi'); ensureId(out.earnings, 'ear');
-  ensureId(out.investments, 'inv'); ensureId(out.negatives, 'neg'); ensureId(out.priorities, 'pri');
+  ensureId(out.investments, 'inv'); ensureId(out.negatives, 'neg'); ensureId(out.priorities, 'pri'); ensureId(out.goals, 'goal');
+  out.goals.forEach(g => { g.target = num(g.target); g.initial = num(g.initial); g.monthly = num(g.monthly); });
   ensureId(out.cardExpenses, 'ce'); ensureId(out.debts, 'debt'); ensureId(out.debtsReceivable, 'rec'); ensureId(out.cards, 'c');
   out.categories = out.categories.filter(c => c && c.name);
   ['fixedIncome','earnings','fixedCosts','variableExpenses','cardExpenses','investments','negatives','priorities'].forEach(k => out[k].forEach(x => { x.amount = num(x.amount); }));
@@ -132,7 +134,7 @@ const S = {
   mode: 'local', user: null, ready: false, sync: 'local', ver: 0,
   ui: { contasFilter: 'pendentes', contasQ: '', homeQ: '', investAll: false, debtTab: 'pagar', quickType: 'gasto' }
 };
-const VIEWS = ['simples','inicio','contas','entradas','fixas','gastos','cartoes','investimentos','dividas','negativados','prioridades','ajustes'];
+const VIEWS = ['simples','inicio','contas','entradas','fixas','gastos','cartoes','investimentos','metas','dividas','negativados','prioridades','ajustes'];
 const NAV = [
   { v: 'inicio', t: 'Início', i: 'home' },
   { v: 'contas', t: 'Contas a pagar', i: 'receipt' },
@@ -143,6 +145,7 @@ const NAV = [
   { v: 'cartoes', t: 'Cartões', i: 'card' },
   { v: 'investimentos', t: 'Investimentos', i: 'trend' },
   { sep: 'Planejamento' },
+  { v: 'metas', t: 'Metas', i: 'target' },
   { v: 'dividas', t: 'Dívidas e a receber', i: 'scale' },
   { v: 'negativados', t: 'Negativados', i: 'ban' },
   { v: 'prioridades', t: 'Prioridades', i: 'star' },
@@ -486,6 +489,7 @@ function ask(title, msg, okLabel = 'Confirmar', danger = false) {
 
 // ---------- formulários genéricos ----------
 function fieldHTML(f, val) {
+  if (f.showIf && !f.showIf()) return '';
   const id = 'f_' + f.k;
   const lab = `<label for="${id}">${esc(f.label)}${f.req ? '' : ' <span class="muted">(opcional)</span>'}</label>`;
   const cls = `field${f.full ? ' full' : ''}`;
@@ -569,7 +573,8 @@ const SCHEMA = {
     { k: 'name', label: 'Nome', type: 'text', req: 1, full: 1, ph: 'Ex: CDB Banco X' },
     { k: 'category', label: 'Tipo', type: 'select', req: 1, opts: INVEST_TYPES.map(t => [t, t === 'Crypto' ? 'Cripto' : t]) },
     { k: 'rate', label: 'Taxa', type: 'text', ph: 'Ex: 110% CDI' },
-    { k: 'amount', label: 'Valor', type: 'money', req: 1 }, { k: 'date', label: 'Data', type: 'date', req: 1 }] },
+    { k: 'amount', label: 'Valor', type: 'money', req: 1 }, { k: 'date', label: 'Data', type: 'date', req: 1 },
+    { k: 'goalId', label: 'Para qual meta', type: 'select', full: 1, opts: () => D().goals.map(g => [g.id, `${g.emoji || '🎯'} ${g.name}`]), showIf: () => D().goals.length > 0, hint: 'Conta no progresso da meta' }] },
   debts: { title: 'dívida', fields: [
     { k: 'name', label: 'Descrição', type: 'text', req: 1, full: 1, ph: 'Ex: Empréstimo Itaú' },
     { k: 'totalAmount', label: 'Valor total', type: 'money', req: 1 }, { k: 'installments', label: 'Nº de parcelas', type: 'int', req: 1 },
@@ -635,7 +640,7 @@ function editItem(key, id) {
       commit(keysTouched); toast('Item excluído');
     },
     deleteLabel: key === 'cards' ? 'Excluir cartão' : 'Excluir',
-    extra: key === 'cards' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Excluir o cartão também apaga as compras lançadas nele.</p>` : (key === 'fixedCosts' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Dica: para parar de pagar uma conta sem perder o histórico, preencha <b>Termina em</b> em vez de excluir.</p>` : '')
+    extra: key === 'cards' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Excluir o cartão também apaga as compras lançadas nele.</p>` : (key === 'fixedCosts' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Dica: para parar de pagar uma conta sem perder o histórico, preencha <b>Termina em</b> em vez de excluir.</p>` : (key === 'priorities' && !isNew ? `<button type="button" class="btn sm" style="margin-top:14px" data-act="pri2goal" data-id="${esc(item.id)}">${ic('target')} Transformar em meta</button><p class="muted" style="font-size:12.5px;margin:8px 0 0">Vira uma meta com valor e prazo, e o app calcula quanto guardar por mês.</p>` : ''))
   });
 }
 
@@ -885,7 +890,7 @@ function kpi(key, icon, tone, value, valCls = '') {
   if (!vis(key)) return '';
   return `<button class="kpi" data-detail="${key}"><div class="kpi-top"><span class="kpi-ico tone-${tone}">${ic(icon)}</span><span class="kpi-label">${esc(CARD_LABELS[key])}</span></div><div class="kpi-value num ${valCls}">${value}</div></button>`;
 }
-function hasAnyData() { const d = D(); return ['fixedIncome','earnings','fixedCosts','variableExpenses','cards','cardExpenses','investments','debts','debtsReceivable','negatives','priorities'].some(k => d[k].length); }
+function hasAnyData() { const d = D(); return ['fixedIncome','earnings','fixedCosts','variableExpenses','cards','cardExpenses','investments','debts','debtsReceivable','negatives','priorities','goals'].some(k => d[k].length); }
 
 // ---------- telas ----------
 function viewInicio() {
@@ -950,6 +955,7 @@ function viewInicio() {
     c.receivables.forEach(r => rows.push(`<div class="row${r.isPaid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="receivable_installment" data-id="${esc(r.id)}" data-tm="${S.m}" data-ty="${S.y}"${r.isPaid ? ' checked' : ''} aria-label="Marcar como recebido"><div class="grow"><div class="t">${esc(r.name)} (${r.label})</div><div class="s">A receber</div></div>${amtBtn(`debtsReceivable|${r.id}`, fmt(r.amount), r.isPaid ? 'pos' : 'muted')}</div>`));
     right.push(`<div class="card"><div class="card-head"><h3>Entradas e recebíveis</h3><button class="btn ghost sm" data-goto="entradas">Ver</button></div><div class="card-body"><div class="list">${rows.length ? rows.join('') : emptyBox('down', 'Nenhuma entrada neste mês.', `<button class="btn sm" data-act="new" data-key="fixedIncome">${ic('plus')} Cadastrar renda</button>`)}</div></div></div>`);
   }
+  if (vis('goalsCard')) { const gc = goalsHomeCard(); if (gc) right.push(gc); }
   if (vis('tableInvest')) right.push(`<div class="card"><div class="card-head"><h3>Investimentos do mês</h3><span class="sub num">${fmt(c.investTotal)}</span></div><div class="card-body"><div class="list">${c.investMonth.length ? c.investMonth.map(investRow).join('') : emptyBox('trend', 'Nenhum aporte neste mês.')}</div></div></div>`);
   if (left.length || right.length) h += `<div class="home-grid">${left.length ? `<div class="grid">${left.join('')}</div>` : ''}<div class="grid" style="align-content:start">${right.join('')}</div></div>`;
   return h;
@@ -966,7 +972,7 @@ function quickCard() {
     </form></div></div>`;
 }
 function investRow(i) {
-  return `<div class="row click" data-edit="investments" data-id="${esc(i.id)}"><span class="ico-c tone-primary">${ic('trend')}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.category === 'Crypto' ? 'Cripto' : (i.category || ''))}${i.rate ? ' · ' + esc(i.rate) : ''} · ${fmtDate(i.date)}</div></div>${amtBtn(`investments|${i.id}`, fmt(i.amount), 'inv')}</div>`;
+  return `<div class="row click" data-edit="investments" data-id="${esc(i.id)}"><span class="ico-c tone-primary">${ic('trend')}</span><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.category === 'Crypto' ? 'Cripto' : (i.category || ''))}${i.rate ? ' · ' + esc(i.rate) : ''} · ${fmtDate(i.date)}${goalTag(i)}</div></div>${amtBtn(`investments|${i.id}`, fmt(i.amount), 'inv')}</div>`;
 }
 
 function viewContas() {
@@ -1123,7 +1129,199 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.10</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.11</p></div>`;
+}
+
+// ---------- metas (objetivos) ----------
+const GOAL_EMOJIS = [['🚗', 'Carro / moto'], ['🏠', 'Casa / imóvel'], ['✈️', 'Viagem'], ['🛟', 'Reserva de emergência'], ['🎓', 'Estudos'], ['💍', 'Casamento / festa'], ['📱', 'Eletrônico'], ['👶', 'Filhos'], ['🛋️', 'Móveis / reforma'], ['💼', 'Negócio próprio'], ['🎁', 'Presente'], ['🎯', 'Outro']];
+const GOAL_PRESETS = [
+  { emoji: '🛟', name: 'Reserva de emergência', color: '#10b981' },
+  { emoji: '🚗', name: 'Carro', color: '#3b82f6' },
+  { emoji: '✈️', name: 'Viagem', color: '#0ea5e9' },
+  { emoji: '🏠', name: 'Entrada da casa própria', color: '#6366f1' }
+];
+const nowIdx = () => { const t = new Date(); return t.getFullYear() * 12 + t.getMonth(); };
+const monIdx = s => { const [yy, mm] = parts(s); return yy && mm ? yy * 12 + mm - 1 : null; };
+const idxLabel = k => `${MSHORT[k % 12].toLowerCase()}/${Math.floor(k / 12)}`;
+const idxLong = k => `${MONTHS[k % 12].toLowerCase()} de ${Math.floor(k / 12)}`;
+const goalDeposits = g => D().investments.filter(i => i.goalId && String(i.goalId) === String(g.id));
+const goalTag = i => { if (!i.goalId) return ''; const g = D().goals.find(x => String(x.id) === String(i.goalId)); return g ? ` · ${esc(g.emoji || '🎯')} ${esc(g.name)}` : ''; };
+const monthsPhrase = n => n === 1 ? '1 mês' : `${n} meses`;
+// quanto costuma sobrar por mês (antes de investir) nos últimos 3 meses fechados
+function avgSurplus() {
+  const cur = nowIdx(), start = autoStart(), vals = [];
+  for (let k = cur - 3; k < cur; k++) { if (k < start) continue; const r = calcM(k % 12, Math.floor(k / 12)); if (r.income > 0 || r.expenses > 0) vals.push(r.remaining + r.investTotal); }
+  return vals.length ? { avg: vals.reduce((s, v) => s + v, 0) / vals.length, n: vals.length } : null;
+}
+// todos os números de uma meta
+function goalStats(g, extra = {}) {
+  const deps = goalDeposits(g);
+  const target = num(extra.target ?? g.target), initial = num(extra.initial ?? g.initial), monthly = num(extra.monthly ?? g.monthly);
+  const deadline = extra.deadline !== undefined ? extra.deadline : g.deadline;
+  const depTotal = deps.reduce((s, i) => s + num(i.amount), 0);
+  const saved = initial + depTotal, missing = Math.max(0, target - saved);
+  const pct = target > 0 ? Math.min(100, saved / target * 100) : 0;
+  const cur = nowIdx();
+  const created = monIdx(g.createdAt) ?? cur - 2;
+  const span = Math.max(1, Math.min(3, cur - created + 1));
+  const recent = deps.filter(i => { const k = monIdx(i.date); return k != null && k <= cur && k > cur - span; }).reduce((s, i) => s + num(i.amount), 0);
+  const pace = recent / span;
+  const thisMonth = deps.filter(i => monIdx(i.date) === cur).reduce((s, i) => s + num(i.amount), 0);
+  const dIdx = deadline ? monIdx(deadline) : null;
+  const left = dIdx != null ? dIdx - cur + 1 : null;
+  const needed = left != null && left > 0 ? missing / left : null;
+  const rate = monthly > 0 ? monthly : pace;
+  let eta = null;
+  if (missing > 0 && rate > 0) { const n = Math.ceil(missing / rate - 1e-9); eta = cur + n - (thisMonth > 0 || monthly <= 0 ? 0 : 1); }
+  const plan = needed != null ? needed : (monthly > 0 ? monthly : 0);
+  let status;
+  if (target > 0 && missing <= 0) status = ['green', 'Concluída 🎉'];
+  else if (left != null && left <= 0) status = ['red', 'Prazo passou'];
+  else if (needed != null) status = rate <= 0 ? ['amber', 'Comece a guardar'] : rate >= needed * 0.98 ? ['green', 'No ritmo'] : ['amber', 'Abaixo do ritmo'];
+  else status = eta != null ? ['blue', 'Sem prazo'] : ['', 'Sem prazo'];
+  return { deps, depTotal, saved, missing, pct, pace, thisMonth, left, needed, rate, eta, plan, status, target, done: target > 0 && missing <= 0 };
+}
+function goalCard(g) {
+  const st = goalStats(g), col = safeColor(g.color, '#6366f1');
+  const lines = [];
+  if (st.done) lines.push(`Você juntou ${fmt(st.saved)}. Parabéns! 🥳`);
+  else {
+    if (st.left != null && st.left > 0) lines.push(`Guarde <b class="num">${fmt(st.needed)}</b> por mês para chegar até ${idxLabel(monIdx(g.deadline))} <span class="muted">(${monthsPhrase(st.left)})</span>`);
+    else if (st.left != null) lines.push(`O prazo era ${idxLabel(monIdx(g.deadline))}. Que tal escolher um novo prazo?`);
+    if (st.eta != null) lines.push(`${g.monthly > 0 ? `Guardando ${fmt(g.monthly)} por mês` : `No ritmo dos últimos meses (${fmt(st.pace)}/mês)`}, você chega em <b>${idxLabel(st.eta)}</b>`);
+    else if (st.left == null) lines.push(`Sem prazo definido. Toque em <b>Guardar</b> para começar, ou edite a meta para colocar um prazo.`);
+  }
+  return `<div class="card goal"><div class="goal-top"><span class="goal-ico" style="background:color-mix(in srgb, ${col} 16%, transparent)">${esc(g.emoji || '🎯')}</span>
+    <div class="grow" style="min-width:0"><div class="goal-name">${esc(g.name)}</div><span class="chip ${st.status[0]}">${st.status[1]}</span></div>
+    <button class="icon-btn" data-act="goaledit" data-id="${esc(g.id)}" aria-label="Editar meta">${ic('pencil')}</button></div>
+    <div class="goal-nums"><b class="num">${fmt(st.saved)}</b><span class="muted num">de ${fmt(g.target)}</span></div>
+    <div class="progress goal-bar"><i style="width:${st.pct}%;background:${col}"></i></div>
+    <div class="goal-foot"><span>${Math.floor(st.pct)}%</span><span>${st.done ? 'meta atingida' : `faltam <b class="num">${fmt(st.missing)}</b>`}</span></div>
+    <div class="goal-lines">${lines.map(l => `<p>${l}</p>`).join('')}</div>
+    <div class="goal-actions">${st.done ? '' : `<button class="btn primary sm" data-act="goalsave" data-id="${esc(g.id)}">${ic('plus')} Guardar</button>`}<button class="btn ghost sm" data-act="goalhist" data-id="${esc(g.id)}">${ic('calendar')} Histórico${st.deps.length ? ` (${st.deps.length})` : ''}</button></div></div>`;
+}
+function viewMetas() {
+  const goals = D().goals;
+  if (!goals.length) return `<div class="card goal-empty"><div class="ei">${ic('target')}</div><h2>Qual é o seu objetivo?</h2>
+    <p class="muted">Um carro, uma viagem, a reserva de emergência… Diga quanto custa e até quando você quer. O app calcula quanto guardar por mês e acompanha o seu progresso.</p>
+    <div class="goal-presets">${GOAL_PRESETS.map((p, i) => `<button class="step" data-act="goalnew" data-preset="${i}"><span class="goal-ico sm">${p.emoji}</span><b>${esc(p.name)}</b></button>`).join('')}</div>
+    <button class="btn primary" data-act="goalnew">${ic('plus')} Criar outra meta</button></div>`;
+  const all = goals.map(g => ({ g, st: goalStats(g) }));
+  const active = all.filter(x => !x.st.done);
+  const totalT = all.reduce((s, x) => s + num(x.g.target), 0), totalS = all.reduce((s, x) => s + x.st.saved, 0);
+  const perMonth = active.reduce((s, x) => s + x.st.plan, 0);
+  const sur = avgSurplus();
+  let insight = '';
+  if (sur && perMonth > 0) {
+    const ok = sur.avg >= perMonth;
+    insight = `<div class="banner ${ok ? 'ok' : 'warn'}">${ic(ok ? 'check' : 'info')}<div>Nos últimos ${sur.n === 1 ? 'mês' : sur.n + ' meses'} sobrou em média <b class="num">${fmt(sur.avg)}</b> por mês (antes de investir). Suas metas pedem <b class="num">${fmt(perMonth)}</b> por mês. ${ok ? 'Dá para cumprir! 💪' : `Faltam cerca de <b class="num">${fmt(perMonth - Math.max(0, sur.avg))}</b> por mês: dá para esticar algum prazo ou cortar alguns gastos.`}</div></div>`;
+  }
+  const order = x => x.st.done ? 2 : x.st.left != null ? 0 : 1;
+  const list = all.slice().sort((a, b) => order(a) - order(b) || (monIdx(a.g.deadline) ?? 1e9) - (monIdx(b.g.deadline) ?? 1e9));
+  return `<div class="stats"><div class="card stat"><span>Já guardado</span><b class="num pos">${fmt(totalS)}</b></div><div class="card stat"><span>Total das metas</span><b class="num">${fmt(totalT)}</b></div><div class="card stat"><span>Guardar por mês</span><b class="num" style="color:var(--blue)">${fmt(perMonth)}</b></div></div>
+  ${insight}
+  <div class="toolbar" style="justify-content:space-between"><span class="muted" style="font-size:13px">${active.length} em andamento${all.length - active.length ? ` · ${all.length - active.length} concluída(s)` : ''}</span><button class="btn sm" data-act="goalnew">${ic('plus')} Nova meta</button></div>
+  <div class="goals-grid">${list.map(x => goalCard(x.g)).join('')}</div>
+  <p class="muted" style="font-size:12.5px;margin:16px 2px 0">Cada valor guardado entra em <b>Investimentos</b> como aporte e conta nas saídas do mês. Assim o seu saldo mostra o dinheiro que sobra de verdade.</p>`;
+}
+function goalPreview(el, g) {
+  const box = el.querySelector('[data-gprev]'); if (!box) return;
+  const val = k => { const i = el.querySelector(`[data-k="${k}"]`); return i ? i.value : ''; };
+  const money = k => { const v = parseMoney(val(k)); return Number.isFinite(v) ? v : 0; };
+  const target = money('target');
+  if (!(target > 0)) { box.innerHTML = `<span class="muted">Preencha o valor do objetivo para ver o plano.</span>`; return; }
+  const st = goalStats(g, { target, initial: money('initial'), monthly: money('monthly'), deadline: val('deadline') || '' });
+  const sur = avgSurplus(), out = [];
+  if (st.done) out.push(`Com o que você já tem guardado, essa meta já está cumprida! 🎉`);
+  else {
+    if (st.left != null && st.left > 0) out.push(`Para juntar <b>${fmt(st.missing)}</b> até ${idxLong(monIdx(val('deadline')))}, guarde <b>${fmt(st.needed)}</b> por mês (${monthsPhrase(st.left)}).`);
+    else if (st.left != null) out.push(`<span class="neg">Esse prazo já passou. Escolha um mês a partir de agora.</span>`);
+    if (money('monthly') > 0 && st.eta != null) out.push(`Guardando <b>${fmt(money('monthly'))}</b> por mês, você chega lá em <b>${idxLong(st.eta)}</b>.`);
+    if (st.left == null && !(money('monthly') > 0)) out.push(`Coloque um prazo <b>ou</b> quanto quer guardar por mês, e o app monta o plano.`);
+    const pm = st.needed ?? (money('monthly') > 0 ? money('monthly') : 0);
+    if (sur && sur.avg > 0 && pm > 0) out.push(`Isso é <b>${Math.round(pm / sur.avg * 100)}%</b> do que costuma sobrar por mês (${fmt(sur.avg)}).`);
+  }
+  box.innerHTML = out.map(x => `<p>${x}</p>`).join('');
+}
+function editGoal(id, prefill = {}) {
+  const isNew = id == null;
+  const g = isNew ? Object.assign({ emoji: '🎯', name: '', target: 0, deadline: '', initial: 0, monthly: 0, color: SWATCHES[D().goals.length % SWATCHES.length] }, prefill) : D().goals.find(x => String(x.id) === String(id));
+  if (!g) return;
+  const fields = [
+    { k: 'emoji', label: 'Tipo', type: 'select', req: 1, full: 1, opts: GOAL_EMOJIS.map(([e, l]) => [e, `${e}  ${l}`]) },
+    { k: 'name', label: 'Nome da meta', type: 'text', req: 1, full: 1, ph: 'Ex: Carro novo, Viagem para a praia' },
+    { k: 'target', label: 'Quanto custa', type: 'money', req: 1 },
+    { k: 'deadline', label: 'Até quando', type: 'month', hint: 'Vazio = sem prazo' },
+    { k: 'initial', label: 'Já tenho guardado', type: 'money', hint: 'Dinheiro já separado para isso' },
+    { k: 'monthly', label: 'Quero guardar por mês', type: 'money', hint: 'Opcional' },
+    { k: 'color', label: 'Cor', type: 'color', full: 1 }
+  ];
+  const el = openForm({
+    title: isNew ? 'Nova meta' : 'Editar meta', fields, values: g,
+    extra: `<div class="goal-preview" data-gprev></div>${!isNew && goalDeposits(g).length ? `<p class="muted" style="font-size:12.5px;margin:10px 0 0">Já foram guardados ${fmt(goalDeposits(g).reduce((s, i) => s + num(i.amount), 0))} em ${goalDeposits(g).length} aporte(s), que somam no progresso.</p>` : ''}`,
+    onSave: v => {
+      if (v.deadline && monIdx(v.deadline) < nowIdx()) { toast('O prazo precisa ser deste mês em diante.', true); return false; }
+      if (!v.deadline) v.deadline = '';
+      if (isNew) {
+        const ng = Object.assign({ id: uid('goal'), createdAt: monthStr(new Date().getMonth(), new Date().getFullYear()) }, v);
+        D().goals.push(ng);
+        const keys = ['goals'];
+        if (g.fromPriority) { D().priorities = D().priorities.filter(p => String(p.id) !== String(g.fromPriority)); keys.push('priorities'); }
+        commit(keys); toast(g.fromPriority ? 'Prioridade virou meta 🎯' : 'Meta criada 🎯');
+        if (location.hash !== '#metas') go('metas');
+      } else { Object.assign(g, v); commit(['goals']); toast('Meta atualizada'); }
+    },
+    onDelete: isNew ? null : () => {
+      D().goals = D().goals.filter(x => x !== g);
+      D().investments.forEach(i => { if (String(i.goalId) === String(g.id)) delete i.goalId; });
+      commit(['goals', 'investments']); toast('Meta excluída');
+    },
+    deleteLabel: 'Excluir meta'
+  });
+  const upd = () => goalPreview(el, isNew ? { id: '__new__' } : g);
+  el.addEventListener('input', upd); el.addEventListener('change', upd); upd();
+}
+function saveToGoal(id) {
+  const g = D().goals.find(x => String(x.id) === String(id)); if (!g) return;
+  const st = goalStats(g);
+  const sug = st.needed ?? (num(g.monthly) > 0 ? num(g.monthly) : 0);
+  const el = openForm({
+    title: `Guardar para ${g.emoji || '🎯'} ${g.name}`,
+    fields: [
+      { k: 'amount', label: 'Quanto você guardou', type: 'money', req: 1, full: 1, hint: sug > 0 ? `Sugestão do plano: ${fmt(Math.min(sug, st.missing))} por mês` : `Faltam ${fmt(st.missing)}` },
+      { k: 'date', label: 'Data', type: 'date', req: 1 },
+      { k: 'category', label: 'Onde está guardado', type: 'select', req: 1, opts: INVEST_TYPES.map(t => [t, t === 'Crypto' ? 'Cripto' : t]) }
+    ],
+    values: { amount: sug > 0 ? Math.round(Math.min(sug, st.missing) * 100) / 100 : 0, date: todayStr(), category: 'Poupança' },
+    extra: `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Entra em <b>Investimentos</b> como aporte e conta nas saídas do mês.</p>`,
+    onSave: v => {
+      D().investments.push({ id: uid('inv'), name: `Meta: ${g.name}`, category: v.category, rate: '', amount: v.amount, date: v.date, goalId: g.id });
+      commit(['investments']);
+      const after = goalStats(g);
+      toast(after.done ? `Meta "${g.name}" concluída! 🎉🎉` : `Guardado! Agora faltam ${fmt(after.missing)}`);
+    }
+  });
+  focusAmount(el);
+}
+function goalHistory(id) {
+  const g = D().goals.find(x => String(x.id) === String(id)); if (!g) return;
+  const st = goalStats(g);
+  const deps = st.deps.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const rows = deps.map(investRow);
+  if (num(g.initial) > 0) rows.push(`<div class="row"><span class="ico-c tone-green">${ic('wallet')}</span><div class="grow"><div class="t">Já tinha guardado</div><div class="s">Valor inicial da meta</div></div><span class="amt num">${fmt(g.initial)}</span></div>`);
+  openSheet({
+    title: `${g.emoji || '🎯'} ${g.name}`,
+    body: `<div data-dsheet><div class="goal-nums" style="margin:0 0 8px"><b class="num">${fmt(st.saved)}</b><span class="muted num">de ${fmt(g.target)}</span></div><div class="progress goal-bar"><i style="width:${st.pct}%;background:${safeColor(g.color)}"></i></div>
+      <div class="list" style="margin-top:12px">${rows.length ? rows.join('') : emptyBox('target', 'Nada guardado ainda para esta meta.')}</div></div>`,
+    foot: `<span class="grow"></span>${st.done ? '' : `<button class="btn primary" data-act="goalsave" data-id="${esc(g.id)}">${ic('plus')} Guardar</button>`}`,
+    onMount: (sh, close) => sh.addEventListener('click', e => { if (e.target.closest('[data-edit],[data-act="goalsave"]')) close(); }, true)
+  });
+}
+function goalsHomeCard() {
+  const goals = D().goals; if (!goals.length) return '';
+  const list = goals.map(g => ({ g, st: goalStats(g) })).filter(x => !x.st.done).slice(0, 3);
+  if (!list.length) return '';
+  return `<div class="card"><div class="card-head"><h3>Metas</h3><button class="btn ghost sm" data-goto="metas">Ver</button></div><div class="card-body"><div class="list">${list.map(({ g, st }) => `<div class="row click" data-goto="metas"><span class="goal-ico sm" style="background:color-mix(in srgb, ${safeColor(g.color)} 16%, transparent)">${esc(g.emoji || '🎯')}</span><div class="grow"><div class="t">${esc(g.name)}</div><div class="progress" style="margin-top:6px"><i style="width:${st.pct}%;background:${safeColor(g.color)}"></i></div></div><span class="amt num">${Math.floor(st.pct)}%<small>${fmtShort(st.saved)} de ${fmtShort(g.target)}</small></span></div>`).join('')}</div></div></div>`;
 }
 
 // ---------- modo simplificado ----------
@@ -1263,9 +1461,9 @@ function simpleForm(dir = 'in', id) {
     }
   });
 }
-const VIEW_FN = { simples: viewSimples, inicio: viewInicio, contas: viewContas, entradas: viewEntradas, fixas: viewFixas, gastos: viewGastos, cartoes: viewCartoes, investimentos: viewInvest, dividas: viewDividas, negativados: viewNegativados, prioridades: viewPrioridades, ajustes: viewAjustes };
+const VIEW_FN = { simples: viewSimples, inicio: viewInicio, contas: viewContas, entradas: viewEntradas, fixas: viewFixas, gastos: viewGastos, cartoes: viewCartoes, investimentos: viewInvest, dividas: viewDividas, negativados: viewNegativados, prioridades: viewPrioridades, metas: viewMetas, ajustes: viewAjustes };
 const TITLES = Object.fromEntries(NAV.concat(NAV_SIMPLE).filter(n => n.v).map(n => [n.v, n.t]));
-const MONTHLESS = ['negativados', 'prioridades', 'ajustes'];
+const MONTHLESS = ['negativados', 'prioridades', 'metas', 'ajustes'];
 
 function manageCategories() {
   const draw = sh => {
@@ -1313,7 +1511,11 @@ function demoData() {
     { id: 'v3', description: 'Cinema', category: 'Lazer', amount: 84, date: ds(0, 10) }, { id: 'v4', description: 'Farmácia', category: 'Saúde', amount: 63.9, date: ds(0, 14) },
     { id: 'v5', description: 'Padaria', category: 'Alimentação', amount: 92.5, date: ds(0, 16) }];
   for (let i = 1; i <= 5; i++) d.variableExpenses.push({ id: 'vp' + i, description: 'Mercado', category: 'Alimentação', amount: 500 + i * 37, date: ds(-i, 5) });
-  d.investments = [{ id: 'i1', name: 'Tesouro Selic', category: 'Tesouro', rate: '100% Selic', amount: 500, date: ds(0, 10) }, { id: 'i2', name: 'CDB Banco X', category: 'CDB', rate: '110% CDI', amount: 1200, date: ds(-2, 10) }, { id: 'i3', name: 'FII HGLG11', category: 'FIIs', rate: '', amount: 800, date: ds(-4, 15) }];
+  d.goals = [
+    { id: 'g1', emoji: '🛟', name: 'Reserva de emergência', target: 15000, initial: 4000, deadline: monthStr((m + 17) % 12, y + Math.floor((m + 17) / 12)), monthly: 0, color: '#10b981', createdAt: monthStr((m + 9) % 12, y - 1) },
+    { id: 'g2', emoji: '🚗', name: 'Carro seminovo', target: 55000, initial: 9000, deadline: `${y + 3}-12`, monthly: 0, color: '#3b82f6', createdAt: monthStr((m + 9) % 12, y - 1) },
+    { id: 'g3', emoji: '✈️', name: 'Viagem para o Nordeste', target: 6000, initial: 0, deadline: '', monthly: 400, color: '#0ea5e9', createdAt: monthStr(m, y) }];
+  d.investments = [{ id: 'i1', name: 'Tesouro Selic', category: 'Tesouro', rate: '100% Selic', amount: 500, date: ds(0, 10), goalId: 'g1' }, { id: 'i4', name: 'Meta: Reserva de emergência', category: 'Poupança', rate: '', amount: 600, date: ds(-1, 10), goalId: 'g1' }, { id: 'i5', name: 'Meta: Carro seminovo', category: 'CDB', rate: '', amount: 700, date: ds(-1, 12), goalId: 'g2' }, { id: 'i2', name: 'CDB Banco X', category: 'CDB', rate: '110% CDI', amount: 1200, date: ds(-2, 10), goalId: 'g2' }, { id: 'i3', name: 'FII HGLG11', category: 'FIIs', rate: '', amount: 800, date: ds(-4, 15) }];
   d.debts = [{ id: 'd1', name: 'Empréstimo pessoal', totalAmount: 6000, installments: 12, date: ds(-3, 15) }];
   d.debtsReceivable = [{ id: 'r1', name: 'Empréstimo p/ João', totalAmount: 900, installments: 3, date: ds(-1, 20) }];
   d.negatives = [{ id: 'n1', description: 'Loja de Móveis', amount: 780, contractDate: `${y - 1}-03-10` }];
@@ -1437,6 +1639,11 @@ document.addEventListener('click', async e => {
     case 'mode': return setMode(t.dataset.v === 'simple');
     case 'menu': return openMenu();
     case 'new': return editItem(t.dataset.key);
+    case 'goalnew': return editGoal(null, t.dataset.preset ? GOAL_PRESETS[+t.dataset.preset] : {});
+    case 'goaledit': return editGoal(t.dataset.id);
+    case 'goalsave': return saveToGoal(t.dataset.id);
+    case 'goalhist': return goalHistory(t.dataset.id);
+    case 'pri2goal': { const p = D().priorities.find(x => String(x.id) === String(t.dataset.id)); closeSheet(); return editGoal(null, p ? { name: p.description, target: p.amount, fromPriority: p.id } : {}); }
     case 'cardbuy': return addCardPurchase();
     case 'cats': return manageCategories();
     case 'export': return exportData();

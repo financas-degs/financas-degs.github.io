@@ -1135,7 +1135,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.12.2</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.12.3</p></div>`;
 }
 
 // ---------- metas (objetivos) ----------
@@ -1332,7 +1332,7 @@ function goalsHomeCard() {
 
 // ---------- assistente (IA: Firebase AI Logic + Gemini, plano gratuito) ----------
 const AI_SDK = '13.2.0';
-const AI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite'];
+const AI_MODELS = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 const AI = { m: null, ai: null, model: 0, busy: false };
 const aiOn = () => !(D().settings && D().settings.aiOff);
 const chatLog = () => S.ui.chat || (S.ui.chat = []);
@@ -1436,6 +1436,7 @@ async function aiCall(text) {
       const st = e && e.customErrorData && e.customErrorData.status, msg = String(e && e.message || '');
       console.warn('IA', AI_MODELS[i], st, msg);
       last = last && aiStatus(last) === 429 && st !== 429 ? last : e;
+      if (/genai config not found|has been deactivated/i.test(msg)) throw e; // problema do projeto, não do modelo
       // modelo inexistente, sem cota gratuita ou que não aceita o pedido: tenta o próximo
       if (st === 404 || st === 429 || st === 400 || /not found|not supported|no longer available|quota|RESOURCE_EXHAUSTED/i.test(msg)) continue;
       throw e;
@@ -1450,6 +1451,8 @@ function aiDetail(e) {
 }
 function aiErrorText(e) {
   const st = e && e.customErrorData && e.customErrorData.status, msg = String(e && e.message || ''), code = e && e.code;
+  if (/genai config not found/i.test(msg)) return 'O Firebase ainda não encontrou a chave da IA (Gemini) deste projeto. Isso costuma se resolver sozinho alguns minutos depois de ativar o AI Logic. Se continuar, confira se existe a chave "Gemini Developer API key" em Google Cloud → APIs e serviços → Credenciais.';
+  if (/has been deactivated/i.test(msg)) return 'O Firebase pausou a IA deste projeto porque o App Check não está aplicado. No Firebase, abra App Check → APIs → Firebase AI Logic e clique em Aplicar.';
   if (code === 'local') return 'O assistente só funciona com a conta conectada (login com Google ou e-mail).';
   if (navigator.onLine === false) return 'Parece que você está sem internet. Tente de novo quando conectar.';
   if (code === 'AI/api-not-enabled' || code === 'api-not-enabled' || /api-not-enabled|has not been used|is disabled|SERVICE_DISABLED/i.test(msg)) return 'O assistente ainda não foi ativado no Firebase. No console do Firebase, abra "AI Logic", toque em "Começar" e escolha "Gemini Developer API". Depois é só tentar de novo.';

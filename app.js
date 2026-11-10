@@ -77,6 +77,7 @@ const P = {
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+  send: '<path d="M4 12 20 4l-5 16-3.5-6.5z"/><path d="M11.5 13.5 20 4"/>',
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>'
 };
 const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
@@ -134,9 +135,10 @@ const S = {
   mode: 'local', user: null, ready: false, sync: 'local', ver: 0,
   ui: { contasFilter: 'pendentes', contasQ: '', homeQ: '', investAll: false, debtTab: 'pagar', quickType: 'gasto' }
 };
-const VIEWS = ['simples','inicio','contas','entradas','fixas','gastos','cartoes','investimentos','metas','dividas','negativados','prioridades','ajustes'];
+const VIEWS = ['simples','inicio','assistente','contas','entradas','fixas','gastos','cartoes','investimentos','metas','dividas','negativados','prioridades','ajustes'];
 const NAV = [
   { v: 'inicio', t: 'Início', i: 'home' },
+  { v: 'assistente', t: 'Assistente', i: 'sparkle' },
   { v: 'contas', t: 'Contas a pagar', i: 'receipt' },
   { sep: 'Lançamentos' },
   { v: 'entradas', t: 'Entradas', i: 'down' },
@@ -156,8 +158,8 @@ const D = () => S.data;
 // modo simplificado: só entradas e saídas, dia a dia (usa as mesmas listas do modo completo)
 const isSimple = () => !!(D().settings && D().settings.simple);
 const percentWithCards = () => !(D().settings && D().settings.percentCards === false);
-const NAV_SIMPLE = [{ v: 'simples', t: 'Meu caixa', i: 'home' }, { sep: 'Conta' }, { v: 'ajustes', t: 'Ajustes', i: 'sliders' }];
-const SIMPLE_VIEWS = ['simples', 'ajustes'];
+const NAV_SIMPLE = [{ v: 'simples', t: 'Meu caixa', i: 'home' }, { v: 'assistente', t: 'Assistente', i: 'sparkle' }, { sep: 'Conta' }, { v: 'ajustes', t: 'Ajustes', i: 'sliders' }];
+const SIMPLE_VIEWS = ['simples', 'assistente', 'ajustes'];
 const navList = () => isSimple() ? NAV_SIMPLE : NAV;
 function fixView() {
   if (isSimple() && !SIMPLE_VIEWS.includes(S.view)) S.view = 'simples';
@@ -898,6 +900,7 @@ function viewInicio() {
   let h = '';
   if (D().settings.isDemo) h += `<div class="banner demo">${ic('sparkle')}<div class="grow"><b>Você está vendo dados de exemplo.</b> Explore à vontade — quando quiser começar de verdade, remova o exemplo.</div><button class="btn sm" data-act="cleardemo">${ic('trash')} Remover exemplo</button></div>`;
   else if (S.mode === 'local' && !window.FIREBASE_CONFIG) h += `<div class="banner">${ic('info')}<div><b>Modo de demonstração.</b> Os dados ficam salvos só neste navegador. Quando conectarmos o Firebase, tudo passa a sincronizar entre computador e celular.</div></div>`;
+  h += askBar();
   if (!hasAnyData()) {
     h += `<div class="card welcome"><div><h2>Bem-vindo(a)${firstName() ? ', ' + esc(firstName()) : ''}! 👋</h2><p class="muted" style="margin:6px 0 0">Comece cadastrando o básico. Depois é só lançar os gastos do dia a dia.</p></div>
       <div class="steps"><button class="step" data-act="new" data-key="fixedIncome"><span class="ico-c tone-green">${ic('down')}</span><b>1. Sua renda</b><span>Salário e entradas fixas</span></button>
@@ -1119,6 +1122,9 @@ function viewAjustes() {
   ${isSimple() ? '' : `<div class="card"><div class="card-head"><div><h3>% da renda comprometida</h3><div class="sub">O que entra no cálculo do indicador "% comprometido"</div></div></div><div class="card-body">
     <div class="set-row"><span class="ico-c tone-violet">${ic('card')}</span><div class="grow"><b>Incluir cartão de crédito</b><span>Soma as faturas do mês às contas fixas antes de calcular o % da renda. Desligado, conta só as contas fixas.</span></div><label class="switch" style="padding:7px 10px"><input type="checkbox" data-pctcards${percentWithCards() ? ' checked' : ''}></label></div>
   </div></div>`}
+  <div class="card"><div class="card-head"><div><h3>Assistente com IA</h3><div class="sub">Lançar, corrigir e perguntar escrevendo do seu jeito</div></div></div><div class="card-body">
+    <div class="set-row"><span class="ico-c tone-primary">${ic('sparkle')}</span><div class="grow"><b>Usar o assistente</b><span>Usa a IA do Google (Gemini, plano gratuito). Para responder, envia sua mensagem e um resumo dos lançamentos dos últimos meses, sem nome nem e-mail. No plano gratuito o Google pode usar esse conteúdo para melhorar os produtos dele. Nada é salvo sem você confirmar.</span></div><label class="switch" style="padding:7px 10px"><input type="checkbox" data-aitoggle${aiOn() ? ' checked' : ''}></label></div>
+  </div></div>
   <div class="card"><div class="card-head"><h3>Aparência</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Tema</b><span>Claro, escuro ou igual ao do aparelho</span></div><div class="seg">${[['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Escuro']].map(([k, l]) => `<button data-theme-set="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('')}</div></div></div></div>
   ${isSimple() ? '' : `<div class="card"><div class="card-head"><div><h3>Painel inicial</h3><div class="sub">Escolha o que aparece na tela de início</div></div></div><div class="card-body"><div class="toggles">
     ${Object.entries(CARD_LABELS).concat(Object.entries(WIDGET_LABELS)).map(([k, l]) => `<label class="switch"><span>${esc(l)}</span><input type="checkbox" data-vis="${k}"${vis(k) ? ' checked' : ''}></label>`).join('')}</div></div></div>`}
@@ -1129,7 +1135,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.11</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.12</p></div>`;
 }
 
 // ---------- metas (objetivos) ----------
@@ -1324,6 +1330,314 @@ function goalsHomeCard() {
   return `<div class="card"><div class="card-head"><h3>Metas</h3><button class="btn ghost sm" data-goto="metas">Ver</button></div><div class="card-body"><div class="list">${list.map(({ g, st }) => `<div class="row click" data-goto="metas"><span class="goal-ico sm" style="background:color-mix(in srgb, ${safeColor(g.color)} 16%, transparent)">${esc(g.emoji || '🎯')}</span><div class="grow"><div class="t">${esc(g.name)}</div><div class="progress" style="margin-top:6px"><i style="width:${st.pct}%;background:${safeColor(g.color)}"></i></div></div><span class="amt num">${Math.floor(st.pct)}%<small>${fmtShort(st.saved)} de ${fmtShort(g.target)}</small></span></div>`).join('')}</div></div></div>`;
 }
 
+// ---------- assistente (IA: Firebase AI Logic + Gemini, plano gratuito) ----------
+const AI_SDK = '13.2.0';
+const AI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite'];
+const AI = { m: null, ai: null, model: 0, busy: false };
+const aiOn = () => !(D().settings && D().settings.aiOff);
+const chatLog = () => S.ui.chat || (S.ui.chat = []);
+const AI_KINDS = { gasto: ['variableExpenses', 'gasto', 'cart'], entrada: ['earnings', 'entrada', 'down'], cartao: ['cardExpenses', 'compra no cartão', 'card'], aporte: ['investments', 'aporte', 'trend'], fixa: ['fixedCosts', 'conta fixa', 'repeat'] };
+const S_STR = (description, extra = {}) => Object.assign({ type: 'string', nullable: true, description }, extra);
+const AI_SCHEMA = {
+  type: 'object', required: ['reply', 'actions'],
+  properties: {
+    reply: { type: 'string', description: 'Resposta curta e simpática para a pessoa, em português do Brasil, sem markdown' },
+    actions: { type: 'array', description: 'Lançamentos para a pessoa confirmar. Vazio quando for só pergunta ou conversa.', items: {
+      type: 'object', required: ['op', 'kind'],
+      properties: {
+        op: { type: 'string', format: 'enum', enum: ['add', 'update', 'delete'] },
+        kind: { type: 'string', format: 'enum', enum: ['gasto', 'entrada', 'cartao', 'aporte', 'fixa'] },
+        id: S_STR('id de um item existente (só para update/delete)'),
+        description: S_STR('descrição curta, ex: Mercado'),
+        amount: { type: 'number', nullable: true, description: 'valor em reais; no cartão é o valor total da compra' },
+        date: S_STR('data AAAA-MM-DD'),
+        category: S_STR('categoria de gasto, exatamente como na lista'),
+        cardId: S_STR('id do cartão'),
+        installments: { type: 'integer', nullable: true, description: 'número de parcelas no cartão' },
+        goalId: S_STR('id da meta (aporte)'),
+        dueDay: { type: 'integer', nullable: true, description: 'dia do vencimento (conta fixa)' },
+        month: S_STR('AAAA-MM: em conta fixa nova, o mês em que começa; em update de conta fixa, muda o valor só desse mês'),
+        paid: { type: 'boolean', nullable: true, description: 'gasto já pago (padrão sim)' }
+      } } }
+  }
+};
+function aiSystem() {
+  const sm = isSimple();
+  return `Você é o assistente do app de finanças pessoais "Minhas Finanças". A pessoa escreve do jeito que fala e você ajuda a lançar, corrigir e apagar movimentações, e responde perguntas sobre o dinheiro dela usando SÓ os dados enviados.
+Regras:
+- Responda sempre no formato JSON pedido. "reply" é curto (1 a 4 frases), em português do Brasil, simpático, sem markdown. Valores no formato R$ 1.234,56.
+- Você NUNCA grava nada: só propõe "actions" e a pessoa confirma no app. Quando houver ações, o reply diz em uma frase o que você preparou e pede para conferir.
+- Perguntas e conversa: actions vazio. Faça as contas com cuidado usando a lista e os resumos. Se o dado não existir, diga que não encontrou.
+- Datas: converta "hoje", "ontem", "sexta", "dia 5" para AAAA-MM-DD a partir de hoje. Sem data = hoje.
+- Gastou/paguei/comprei (à vista, pix, débito, dinheiro) => kind "gasto"${sm ? ' (category vazia)' : ', com a categoria mais parecida da lista'}.
+- Recebi/ganhei/entrou/comissão/salário extra => kind "entrada".
+${sm ? '- Este usuário usa o modo Simples: use só "gasto" e "entrada".' : `- No cartão / no crédito / parcelado em Nx => kind "cartao" com cardId da lista (se só houver um cartão, use ele; se houver vários e não disse qual, pergunte e não crie a ação), installments (1 se à vista) e amount = valor TOTAL.
+- Guardei/investi/apliquei/separei para a meta => kind "aporte" (goalId se mencionar uma meta).
+- Conta que se repete todo mês (aluguel, internet, academia) => kind "fixa" com dueDay e month (mês de início).
+- "A conta de luz deste mês veio 230" => update da conta fixa com amount e month do mês (muda só aquele mês).`}
+- Corrigir ou apagar: use o id de um item da lista "Lançamentos". Nunca invente id. "o último gasto" = o gasto com data mais recente. Se houver mais de um item possível e não der para saber qual, pergunte e não crie a ação.
+- Em update, preencha só os campos que mudam.
+- Várias coisas numa frase ("gastei 30 de uber e 50 de mercado") => várias actions. Máximo 10.
+- Pode dar dicas gerais de organização financeira, mas não recomende investimentos, ações ou produtos específicos.
+- Se pedirem algo fora de finanças pessoais, responda brevemente e volte ao assunto.`;
+}
+function aiContext() {
+  const d = D(), sm = isSimple(), cur = nowIdx(), t = new Date();
+  const inR = s => { const k = monIdx(s); return k != null && k >= cur - 2 && k <= cur + 1; };
+  const L = [];
+  L.push(`Hoje: ${todayStr()} (${WDAYS[t.getDay()]}). Mês aberto na tela: ${MONTHS[S.m]} de ${S.y}.`);
+  if (!sm) {
+    L.push('Categorias de gasto: ' + d.categories.map(c => c.name).join(', '));
+    L.push('Cartões (id | nome | fecha dia | vence dia): ' + (d.cards.map(c => `${c.id} | ${c.name} | ${c.closingDay} | ${c.dueDay}`).join(' ; ') || 'nenhum'));
+    L.push('Metas (id | nome | valor | guardado | prazo): ' + (d.goals.map(g => `${g.id} | ${g.name} | ${g.target} | ${goalStats(g).saved.toFixed(2)} | ${g.deadline || 'sem prazo'}`).join(' ; ') || 'nenhuma'));
+    L.push('Contas fixas (id | nome | valor padrão | vence dia | começa | termina): ' + (d.fixedCosts.map(c => `${c.id} | ${c.name} | ${c.amount} | ${c.dueDay} | ${c.startDate || ''} | ${c.endDate || ''}`).join(' ; ') || 'nenhuma'));
+    L.push('Renda fixa: ' + (d.fixedIncome.map(c => `${c.description} ${c.amount}`).join(' ; ') || 'nenhuma'));
+  }
+  const tx = [];
+  d.variableExpenses.filter(x => inR(x.date)).forEach(x => { const [yy, mm] = parts(x.date); tx.push([x.date, `gasto | ${x.id} | ${x.date} | ${x.description || ''} | ${x.category || '-'} | ${num(x.amount)} | ${isPaid('variable', x.id, mm - 1, yy) ? 'pago' : 'não pago'}`]); });
+  d.earnings.filter(x => inR(x.date)).forEach(x => tx.push([x.date, `entrada | ${x.id} | ${x.date} | ${x.description || ''} | ${num(x.amount)}`]));
+  if (!sm) {
+    d.investments.filter(x => inR(x.date)).forEach(x => tx.push([x.date, `aporte | ${x.id} | ${x.date} | ${x.name || ''} | ${num(x.amount)}${x.goalId ? ' | meta ' + x.goalId : ''}`]));
+    d.cardExpenses.filter(x => inR(x.date)).forEach(x => { const c = d.cards.find(k => String(k.id) === String(x.cardId)); tx.push([x.purchaseDate || x.date, `cartao | ${x.id} | compra ${x.purchaseDate || '?'} | fatura ${x.date} | ${x.description || ''} | parcela ${x.installmentLabel || '1/1'} | ${num(x.amount)} | ${c ? c.name : ''}`]); });
+  }
+  tx.sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+  L.push(`Lançamentos dos últimos meses (tipo | id | ...), do mais recente para o mais antigo:\n${tx.slice(0, 150).map(x => x[1]).join('\n') || 'nenhum'}`);
+  const sums = [];
+  for (let k = cur - 2; k <= cur + 1; k++) {
+    const r = calcM(k % 12, Math.floor(k / 12));
+    const cats = Object.entries(r.catTotals).map(([n, v]) => `${n || 'Sem categoria'} ${v.toFixed(2)}`).join(', ');
+    sums.push(`${MONTHS[k % 12]}/${Math.floor(k / 12)}: entradas ${r.income.toFixed(2)}; saídas já pagas ${r.expenses.toFixed(2)}; saldo ${r.remaining.toFixed(2)}${sm ? '' : `; contas fixas ${r.fixedTotal.toFixed(2)}; faturas ${r.cardsDue.toFixed(2)}; aportes ${r.investTotal.toFixed(2)}; total a pagar no mês ${r.monthlyTotal.toFixed(2)}; ainda pendente ${r.pendingTotal.toFixed(2)}`}; gastos por categoria: ${cats || 'nenhum'}`);
+  }
+  L.push('Resumo por mês:\n' + sums.join('\n'));
+  return L.join('\n');
+}
+async function aiCall(text) {
+  if (window.__aiMock) return window.__aiMock(text, aiContext());
+  if (!window.FIREBASE_CONFIG) throw Object.assign(new Error('Modo local'), { code: 'local' });
+  if (!AI.ai) {
+    const base = `https://www.gstatic.com/firebasejs/${AI_SDK}/`;
+    const [a, m] = await Promise.all([import(base + 'firebase-app.js'), import(base + 'firebase-ai.js')]);
+    const app = a.getApps().find(x => x.name === 'assistente') || a.initializeApp(window.FIREBASE_CONFIG, 'assistente');
+    // proteção contra uso indevido (App Check com reCAPTCHA v3, gratuito). A chave do site vai em firebase-config.js
+    if (window.APP_CHECK_KEY) { try { const ac = await import(base + 'firebase-app-check.js'); ac.initializeAppCheck(app, { provider: new ac.ReCaptchaV3Provider(window.APP_CHECK_KEY), isTokenAutoRefreshEnabled: true }); } catch (e) { console.warn('App Check', e); } }
+    AI.m = m; AI.ai = m.getAI(app, { backend: new m.GoogleAIBackend() });
+  }
+  const hist = chatLog().slice(-9, -1).map(x => `${x.role === 'user' ? 'Pessoa' : 'Assistente'}: ${x.text}`).join('\n');
+  const prompt = `${aiContext()}\n\n${hist ? `Conversa até agora:\n${hist}\n\n` : ''}Mensagem nova da pessoa: ${text}`;
+  for (let i = AI.model; i < AI_MODELS.length; i++) {
+    const model = AI.m.getGenerativeModel(AI.ai, { model: AI_MODELS[i], systemInstruction: aiSystem(), generationConfig: { responseMimeType: 'application/json', responseSchema: AI_SCHEMA, temperature: 0.2, maxOutputTokens: 2048 } });
+    try {
+      const res = await model.generateContent(prompt);
+      AI.model = i;
+      const raw = res.response.text().trim().replace(/^```(json)?/i, '').replace(/```$/, '');
+      return JSON.parse(raw);
+    } catch (e) {
+      const st = e && e.customErrorData && e.customErrorData.status, msg = String(e && e.message || '');
+      if ((st === 404 || /not found|is not supported|no longer available/i.test(msg)) && i < AI_MODELS.length - 1) continue;
+      throw e;
+    }
+  }
+}
+function aiErrorText(e) {
+  const st = e && e.customErrorData && e.customErrorData.status, msg = String(e && e.message || ''), code = e && e.code;
+  if (code === 'local') return 'O assistente só funciona com a conta conectada (login com Google ou e-mail).';
+  if (navigator.onLine === false) return 'Parece que você está sem internet. Tente de novo quando conectar.';
+  if (code === 'AI/api-not-enabled' || code === 'api-not-enabled' || /api-not-enabled|has not been used|is disabled|SERVICE_DISABLED/i.test(msg)) return 'O assistente ainda não foi ativado no Firebase. No console do Firebase, abra "AI Logic", toque em "Começar" e escolha "Gemini Developer API". Depois é só tentar de novo.';
+  if (st === 429 || /quota|rate|RESOURCE_EXHAUSTED|429/i.test(msg)) return 'O limite gratuito do assistente foi atingido por agora. Espere um minutinho e tente de novo. (Se acontecer muito, pode ser o limite do dia.)';
+  if (st === 401 || /app.?check|appcheck|UNAUTHENTICATED/i.test(msg)) return window.APP_CHECK_KEY ? 'A proteção do app (App Check) recusou o pedido. Confira se o domínio financas-degs.github.io está na chave do reCAPTCHA e se o App Check foi registrado no Firebase.' : 'O Firebase está exigindo a proteção do app (App Check), que ainda não foi configurada aqui. Me peça para configurar: é gratuito e leva uns 10 minutos.';
+  if (st === 403 || /PERMISSION_DENIED|403|API key/i.test(msg)) return 'O Firebase recusou o pedido (permissão). Confira se o "AI Logic" está ativado com a "Gemini Developer API".';
+  if (e instanceof SyntaxError) return 'Não entendi bem a resposta da IA. Pode repetir com outras palavras?';
+  return 'Não consegui falar com a IA agora. Tente de novo em instantes.' + (msg ? ` (${msg.slice(0, 140)})` : '');
+}
+const aiList = kind => D()[AI_KINDS[kind][0]];
+const aiFind = a => (aiList(a.kind) || []).find(x => String(x.id) === String(a.id));
+const isDay = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !isNaN(new Date(s));
+const isMon = s => /^\d{4}-\d{2}$/.test(String(s || ''));
+// confere a ação da IA e completa o que faltar; devolve null se não dá para usar
+function aiClean(raw) {
+  const sm = isSimple(), d = D();
+  const a = { op: raw.op, kind: raw.kind, state: 'pending' };
+  if (!['add', 'update', 'delete'].includes(a.op) || !AI_KINDS[a.kind]) return null;
+  if (sm && !['gasto', 'entrada'].includes(a.kind)) return null;
+  const amt = raw.amount != null && Number.isFinite(Number(raw.amount)) ? Math.round(Math.abs(Number(raw.amount)) * 100) / 100 : null;
+  if (raw.description) a.description = String(raw.description).trim().slice(0, 80);
+  if (amt != null) a.amount = amt;
+  if (raw.date) a.date = isDay(raw.date) ? raw.date : null;
+  if (a.kind === 'gasto') { const c = d.categories.find(c => c.name.toLowerCase() === String(raw.category || '').toLowerCase()); a.category = sm ? '' : (c ? c.name : (a.op === 'add' ? (d.categories.find(c => c.name === 'Outros') || d.categories[0] || { name: '' }).name : undefined)); a.paid = raw.paid !== false; }
+  if (a.kind === 'cartao' && a.op === 'add') { const c = d.cards.find(c => String(c.id) === String(raw.cardId)) || (d.cards.length === 1 ? d.cards[0] : null); if (!c) return null; a.cardId = c.id; a.installments = Math.min(48, Math.max(1, parseInt(raw.installments) || 1)); }
+  if (a.kind === 'aporte' && raw.goalId && d.goals.some(g => String(g.id) === String(raw.goalId))) a.goalId = raw.goalId;
+  if (a.kind === 'fixa') { if (raw.dueDay) a.dueDay = Math.min(31, Math.max(1, parseInt(raw.dueDay) || 10)); if (isMon(raw.month)) a.month = raw.month; }
+  if (a.op === 'add') {
+    if (!(a.amount > 0)) return null;
+    if (!a.date) a.date = todayStr();
+    if (!a.description) a.description = a.kind === 'gasto' ? (a.category || 'Gasto') : a.kind === 'entrada' ? 'Entrada' : a.kind === 'aporte' ? 'Aporte' : 'Conta';
+    if (a.kind === 'fixa') { if (!a.dueDay) a.dueDay = 10; if (!a.month) a.month = monthStr(new Date().getMonth(), new Date().getFullYear()); }
+  } else {
+    a.id = raw.id; const it = aiFind(a); if (!it) return null;
+    a.label = aiItemLabel(a);
+    if (a.op === 'update' && a.amount == null && !a.description && !a.date && !(a.kind === 'gasto' && raw.category) && !a.dueDay && !a.goalId) return null;
+    if (a.kind === 'fixa' && a.op === 'update' && a.month && a.amount == null) delete a.month;
+  }
+  return a;
+}
+function aiItemLabel(a) {
+  const it = aiFind(a); if (!it) return '';
+  const name = it.description || it.name || '—';
+  return a.kind === 'fixa' ? `${name} · ${fmt(it.amount)}/mês` : `${name} · ${fmt(it.amount)} · ${fmtDate(it.date)}${it.installmentLabel ? ' · parcela ' + it.installmentLabel : ''}`;
+}
+function aiActionHTML(a, mi, ai) {
+  const [, label, icon] = AI_KINDS[a.kind];
+  const tone = a.op === 'delete' ? 'red' : a.kind === 'entrada' ? 'green' : a.kind === 'aporte' ? 'primary' : a.kind === 'cartao' ? 'violet' : 'blue';
+  let title, rows = [];
+  if (a.op === 'add') {
+    title = { gasto: 'Novo gasto', entrada: 'Nova entrada', cartao: 'Compra no cartão', aporte: 'Guardar / investir', fixa: 'Nova conta fixa' }[a.kind];
+    rows.push(['O quê', esc(a.description)]);
+    rows.push(['Valor', `<b class="num">${fmt(a.amount)}</b>${a.kind === 'cartao' && a.installments > 1 ? ` <span class="muted">(${a.installments}x de ${fmt(a.amount / a.installments)})</span>` : ''}`]);
+    if (a.kind === 'fixa') rows.push(['Vence', `dia ${a.dueDay} · a partir de ${fmtDate(a.month)}`]);
+    else rows.push([a.kind === 'cartao' ? 'Compra em' : 'Data', fmtDate(a.date)]);
+    if (a.kind === 'gasto' && a.category) rows.push(['Categoria', esc(a.category)]);
+    if (a.kind === 'cartao') { const c = D().cards.find(c => String(c.id) === String(a.cardId)); rows.push(['Cartão', esc(c ? c.name : '?')]); }
+    if (a.kind === 'aporte' && a.goalId) { const g = D().goals.find(g => String(g.id) === String(a.goalId)); if (g) rows.push(['Meta', `${esc(g.emoji || '🎯')} ${esc(g.name)}`]); }
+  } else if (a.op === 'update') {
+    const it = aiFind(a) || {};
+    title = `Alterar ${label}`;
+    rows.push(['Item', esc(a.label || aiItemLabel(a))]);
+    if (a.amount != null) rows.push([a.kind === 'fixa' && a.month ? `Valor de ${fmtDate(a.month)}` : 'Novo valor', `<b class="num">${fmt(a.amount)}</b>`]);
+    if (a.description && a.description !== (it.description || it.name)) rows.push(['Novo nome', esc(a.description)]);
+    if (a.date && a.date !== it.date) rows.push(['Nova data', fmtDate(a.date)]);
+    if (a.kind === 'gasto' && a.category && a.category !== it.category) rows.push(['Categoria', esc(a.category)]);
+    if (a.dueDay) rows.push(['Vencimento', 'dia ' + a.dueDay]);
+  } else {
+    const it = aiFind(a) || {};
+    const grp = a.kind === 'cartao' && it.groupId ? D().cardExpenses.filter(x => x.groupId === it.groupId).length : 1;
+    title = `Excluir ${label}`;
+    rows.push(['Item', esc(a.label || aiItemLabel(a))]);
+    if (grp > 1) rows.push(['Atenção', `apaga a compra inteira (${grp} parcelas)`]);
+  }
+  const k = `${mi}|${ai}`;
+  const foot = a.state === 'done' ? `<span class="chip green">${ic('check')} Feito</span>` : a.state === 'discarded' ? `<span class="chip">Descartado</span>` : a.state === 'gone' ? `<span class="chip">Item não existe mais</span>`
+    : `<button class="btn sm ${a.op === 'delete' ? 'danger solid' : 'primary'}" data-aiact="ok|${k}">${ic('check')} ${a.op === 'delete' ? 'Excluir' : 'Confirmar'}</button>${a.op !== 'delete' ? `<button class="btn sm" data-aiact="edit|${k}">${ic('pencil')} Ajustar</button>` : ''}<button class="btn ghost sm" data-aiact="no|${k}">Descartar</button>`;
+  return `<div class="ai-card${a.state !== 'pending' ? ' settled' : ''}"><div class="ai-card-h"><span class="ico-c tone-${tone}">${ic(a.op === 'delete' ? 'trash' : a.op === 'update' ? 'pencil' : icon)}</span><b>${title}</b></div>
+    <div class="ai-rows">${rows.map(([l, v]) => `<div><span>${l}</span><span>${v}</span></div>`).join('')}</div><div class="ai-card-f">${foot}</div></div>`;
+}
+const AI_SNAP_KEYS = ['variableExpenses', 'earnings', 'investments', 'cardExpenses', 'fixedCosts', 'payments'];
+function aiApply(a) {
+  const d = D(), sm = isSimple(), keys = new Set([AI_KINDS[a.kind][0]]);
+  if (!['add'].includes(a.op) && !aiFind(a)) { a.state = 'gone'; return false; }
+  if (a.op === 'add') {
+    if (a.kind === 'gasto') { const it = { id: uid('var'), description: a.description, amount: a.amount, date: a.date, category: sm ? '' : (a.category || '') }; if (sm) it.simple = true; d.variableExpenses.push(it); if (a.paid !== false || sm) { const [yy, mm] = parts(it.date); setPaid('variable', it.id, true, mm - 1, yy, mm - 1, yy); } keys.add('payments'); }
+    else if (a.kind === 'entrada') { const it = { id: uid('ear'), description: a.description, amount: a.amount, date: a.date, color: '#10b981' }; if (sm) it.simple = true; d.earnings.push(it); }
+    else if (a.kind === 'cartao') saveCardPurchase({ cardId: a.cardId, description: a.description, amount: a.amount, installments: a.installments || 1, date: a.date }, true);
+    else if (a.kind === 'aporte') d.investments.push(Object.assign({ id: uid('inv'), name: a.description, category: 'Outros', rate: '', amount: a.amount, date: a.date }, a.goalId ? { goalId: a.goalId } : {}));
+    else if (a.kind === 'fixa') d.fixedCosts.push({ id: uid('fix'), name: a.description, amount: a.amount, dueDay: a.dueDay || 10, startDate: a.month, color: SWATCHES[d.fixedCosts.length % SWATCHES.length] });
+  } else if (a.op === 'update') {
+    const it = aiFind(a);
+    if (a.kind === 'fixa') {
+      if (a.amount != null) { if (a.month) { it.amounts = Object.assign({}, it.amounts); if (Math.abs(a.amount - num(it.amount)) < 0.005) delete it.amounts[a.month]; else it.amounts[a.month] = a.amount; if (!Object.keys(it.amounts).length) delete it.amounts; } else it.amount = a.amount; }
+      if (a.description) it.name = a.description; if (a.dueDay) it.dueDay = a.dueDay;
+    } else {
+      const wasPaid = a.kind === 'gasto' && (() => { const [yy, mm] = parts(it.date); return isPaid('variable', it.id, mm - 1, yy); })();
+      if (a.amount != null) it.amount = a.amount;
+      if (a.description) { if (a.kind === 'aporte') it.name = a.description; else it.description = a.description; }
+      if (a.date && a.kind !== 'cartao') it.date = a.date;
+      if (a.kind === 'gasto' && a.category !== undefined && a.category && !sm) it.category = a.category;
+      if (a.kind === 'aporte' && a.goalId) it.goalId = a.goalId;
+      if (a.kind === 'gasto' && a.date) { d.payments = d.payments.filter(p => !(p.type === 'variable' && String(p.originalId) === String(it.id))); if (wasPaid) { const [yy, mm] = parts(it.date); setPaid('variable', it.id, true, mm - 1, yy, mm - 1, yy); } keys.add('payments'); }
+    }
+  } else {
+    const it = aiFind(a);
+    if (a.kind === 'cartao' && it.groupId) d.cardExpenses = d.cardExpenses.filter(x => x.groupId !== it.groupId);
+    else d[AI_KINDS[a.kind][0]] = aiList(a.kind).filter(x => x !== it);
+    if (a.kind === 'gasto') { d.payments = d.payments.filter(p => !(p.type === 'variable' && String(p.originalId) === String(it.id))); keys.add('payments'); }
+  }
+  a.state = 'done';
+  return [...keys];
+}
+function aiConfirm(list) {
+  const snap = clone(Object.fromEntries(AI_SNAP_KEYS.map(k => [k, D()[k]])));
+  const keys = new Set(); let n = 0;
+  list.forEach(a => { const k = aiApply(a); if (k) { k.forEach(x => keys.add(x)); n++; } });
+  if (!n) { render(); return toast('Esse item não existe mais.', true); }
+  commit([...keys]);
+  toast(n > 1 ? `${n} itens salvos` : list[0].op === 'delete' ? 'Excluído' : 'Salvo', false, { label: 'Desfazer', fn: () => { Object.assign(S.data, snap); list.forEach(a => { if (a.state === 'done') a.state = 'pending'; }); commit(AI_SNAP_KEYS); } });
+}
+function aiEdit(a) {
+  const sm = isSimple();
+  const F = {
+    gasto: [{ k: 'description', label: 'Descrição', type: 'text', req: 1, full: 1 }, { k: 'amount', label: 'Valor', type: 'money', req: 1 }, { k: 'date', label: 'Data', type: 'date', req: 1 }].concat(sm ? [] : [{ k: 'category', label: 'Categoria', type: 'select', req: 1, full: 1, opts: catOpts }]),
+    entrada: [{ k: 'description', label: 'Descrição', type: 'text', req: 1, full: 1 }, { k: 'amount', label: 'Valor', type: 'money', req: 1 }, { k: 'date', label: 'Data', type: 'date', req: 1 }],
+    cartao: [{ k: 'cardId', label: 'Cartão', type: 'select', req: 1, full: 1, opts: () => D().cards.map(c => [c.id, c.name]) }, { k: 'description', label: 'O que foi comprado', type: 'text', req: 1, full: 1 }, { k: 'amount', label: 'Valor total', type: 'money', req: 1 }, { k: 'installments', label: 'Parcelas', type: 'int', req: 1, max: 48 }, { k: 'date', label: 'Data da compra', type: 'date', req: 1, full: 1 }],
+    aporte: [{ k: 'description', label: 'Nome', type: 'text', req: 1, full: 1 }, { k: 'amount', label: 'Valor', type: 'money', req: 1 }, { k: 'date', label: 'Data', type: 'date', req: 1 }, { k: 'goalId', label: 'Para qual meta', type: 'select', full: 1, opts: () => D().goals.map(g => [g.id, `${g.emoji || '🎯'} ${g.name}`]), showIf: () => D().goals.length > 0 }],
+    fixa: [{ k: 'description', label: 'Nome da conta', type: 'text', req: 1, full: 1 }, { k: 'amount', label: a.op === 'update' && a.month ? `Valor de ${fmtDate(a.month)}` : 'Valor mensal', type: 'money', req: 1 }, { k: 'dueDay', label: 'Dia do vencimento', type: 'day', req: 1 }].concat(a.op === 'add' ? [{ k: 'month', label: 'Começa em', type: 'month', req: 1 }] : [])
+  };
+  let fields = F[a.kind];
+  const it = a.op === 'update' ? aiFind(a) : null;
+  const values = Object.assign({}, it ? { description: it.description || it.name, amount: it.amount, date: it.date, category: it.category, dueDay: it.dueDay, goalId: it.goalId } : {}, a);
+  if (a.op === 'update' && a.kind === 'cartao') fields = [{ k: 'description', label: 'Descrição', type: 'text', req: 1, full: 1 }, { k: 'amount', label: 'Valor desta parcela', type: 'money', req: 1, full: 1 }];
+  openForm({ title: 'Ajustar antes de salvar', fields, values, onSave: v => { Object.keys(v).forEach(k => { if (v[k] !== '' && v[k] != null) a[k] = v[k]; else if (k === 'goalId') delete a.goalId; }); render(); } });
+}
+async function aiSend(text) {
+  text = String(text || '').trim();
+  if (!text || AI.busy) return;
+  if (!D().settings.aiConsent) {
+    const ok = await ask('Antes de começar', 'Para entender o que você escreve, o assistente envia sua mensagem e um resumo dos seus lançamentos dos últimos meses para a IA do Google (Gemini). Seu nome e e-mail <b>não</b> são enviados.<br><br>No plano gratuito, o Google pode usar esse conteúdo para melhorar os produtos dele. Nada é salvo sem você confirmar.', 'Entendi, continuar');
+    if (!ok) return;
+    D().settings.aiConsent = true; commit(['settings']);
+  }
+  S.ui.chatDraft = '';
+  chatLog().push({ role: 'user', text });
+  AI.busy = true;
+  if (S.view !== 'assistente') go('assistente'); else render();
+  let msg;
+  try {
+    const out = await aiCall(text) || {};
+    const acts = (Array.isArray(out.actions) ? out.actions : []).slice(0, 10).map(x => x && aiClean(x)).filter(Boolean);
+    const dropped = (Array.isArray(out.actions) ? out.actions.length : 0) - acts.length;
+    msg = { role: 'bot', text: String(out.reply || (acts.length ? 'Preparei isso, confira:' : 'Não entendi. Pode explicar de outro jeito?')).slice(0, 1200), actions: acts };
+    if (dropped > 0) msg.note = dropped === 1 ? 'Uma das sugestões não pôde ser usada (faltou valor, cartão ou o item não foi encontrado).' : `${dropped} sugestões não puderam ser usadas (faltou valor, cartão ou o item não foi encontrado).`;
+  } catch (e) { console.error(e); msg = { role: 'bot', text: aiErrorText(e), error: true }; }
+  AI.busy = false;
+  chatLog().push(msg);
+  if (S.ready) render();
+  aiScroll();
+}
+function aiScroll() { requestAnimationFrame(() => { const end = document.getElementById('chatend'); if (end) end.scrollIntoView({ block: 'end', behavior: 'smooth' }); }); }
+const aiText = s => esc(s).replace(/\n/g, '<br>');
+function aiSuggestions() {
+  if (isSimple()) return ['Recebi 350 de comissão hoje', 'Gastei 42 de gasolina', 'Quanto entrou este mês?', 'Apaga a última saída'];
+  const s = ['Gastei 87 no mercado hoje', 'Recebi 1.200 de comissão', 'Quanto gastei com alimentação este mês?'];
+  if (D().cards.length) s.push(`Comprei um tênis de 300 em 3x no ${D().cards[0].name}`);
+  if (D().goals.length) s.push(`Guardei 200 para ${D().goals[0].name.toLowerCase()}`);
+  s.push('A conta de luz deste mês veio 230', 'Quanto sobra até o fim do mês?');
+  return s.slice(0, 6);
+}
+function askBar() {
+  if (!aiOn()) return '';
+  return `<form class="ask-bar" data-chatform><span class="ask-ico">${ic('sparkle')}</span><input data-chatq autocomplete="off" enterkeyhint="send" placeholder="${isSimple() ? 'Ex: recebi 350 de comissão hoje' : 'Ex: gastei 87 no mercado hoje'}" aria-label="Escreva para o assistente"><button class="btn primary sm" type="submit" aria-label="Enviar">${ic('send')}</button></form>`;
+}
+function viewAssistente() {
+  if (!aiOn()) return `<div class="card goal-empty"><div class="ei">${ic('sparkle')}</div><h2>Assistente desligado</h2><p class="muted">Você desligou o assistente com IA nos Ajustes.</p><button class="btn primary" data-act="aion">Ligar o assistente</button></div>`;
+  const log = chatLog();
+  let h = `<div class="chat">`;
+  if (!log.length) h += `<div class="chat-intro"><div class="ai-ava">${ic('sparkle')}</div><h2>Oi! Como posso ajudar?</h2><p class="muted">Me conte o que entrou e o que saiu do jeito que você fala. Eu preparo o lançamento e você confirma. Também posso corrigir, apagar e responder perguntas sobre o seu dinheiro.</p>
+    <div class="chat-sugs">${aiSuggestions().map(s => `<button class="chip-btn" data-aisug="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>`;
+  log.forEach((m, mi) => {
+    if (m.role === 'user') h += `<div class="msg me"><div class="bubble">${aiText(m.text)}</div></div>`;
+    else {
+      const pend = (m.actions || []).filter(a => a.state === 'pending').length;
+      h += `<div class="msg bot"><span class="ai-ava sm">${ic('sparkle')}</span><div class="bot-col"><div class="bubble${m.error ? ' err' : ''}">${aiText(m.text)}</div>
+        ${(m.actions || []).map((a, ai) => aiActionHTML(a, mi, ai)).join('')}
+        ${pend > 1 ? `<button class="btn primary sm" data-aiact="all|${mi}|0">${ic('check')} Confirmar todos (${pend})</button>` : ''}
+        ${m.note ? `<p class="muted ai-note">${esc(m.note)}</p>` : ''}</div></div>`;
+    }
+  });
+  if (AI.busy) h += `<div class="msg bot"><span class="ai-ava sm">${ic('sparkle')}</span><div class="bubble typing"><i></i><i></i><i></i></div></div>`;
+  h += `<div id="chatend"></div></div>
+  <form class="chat-input" data-chatform><input data-chatq autocomplete="off" enterkeyhint="send" placeholder="Escreva aqui…" value="${esc(S.ui.chatDraft || '')}" aria-label="Mensagem para o assistente"${AI.busy ? ' disabled' : ''}><button class="btn primary" type="submit" aria-label="Enviar"${AI.busy ? ' disabled' : ''}>${ic('send')}</button></form>
+  <p class="chat-foot muted">A IA pode errar: confira antes de confirmar.${log.length ? ' <button class="linkish" data-act="aiclear">Limpar conversa</button>' : ''}</p>`;
+  return h;
+}
+
 // ---------- modo simplificado ----------
 const WDAYS = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
 function setMode(simple) {
@@ -1367,6 +1681,7 @@ function viewSimples() {
   const t = new Date(), today = todayStr(), yd = (() => { const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
   let h = '';
   if (D().settings.isDemo) h += `<div class="banner demo">${ic('sparkle')}<div class="grow"><b>Você está vendo dados de exemplo.</b></div><button class="btn sm" data-act="cleardemo">${ic('trash')} Remover exemplo</button></div>`;
+  h += askBar();
   h += `<div class="hero"><div class="hero-label">${ci ? 'Saldo acumulado' : 'Saldo de ' + MONTHS[S.m].toLowerCase()}</div>
     <div class="hero-value num" data-detail="restante" style="margin-bottom:${ci ? 4 : 16}px">${fmt(final)}</div>
     ${ci ? `<div class="hero-carry" data-detail="restante">Veio do mês anterior <b class="num">${fmt(ci.prev)}</b> <span>·</span> Resultado de ${MONTHS[S.m].toLowerCase()} <b class="num">${res >= 0 ? '+' : ''}${fmt(res)}</b></div>` : ''}
@@ -1461,9 +1776,9 @@ function simpleForm(dir = 'in', id) {
     }
   });
 }
-const VIEW_FN = { simples: viewSimples, inicio: viewInicio, contas: viewContas, entradas: viewEntradas, fixas: viewFixas, gastos: viewGastos, cartoes: viewCartoes, investimentos: viewInvest, dividas: viewDividas, negativados: viewNegativados, prioridades: viewPrioridades, metas: viewMetas, ajustes: viewAjustes };
+const VIEW_FN = { simples: viewSimples, inicio: viewInicio, contas: viewContas, entradas: viewEntradas, fixas: viewFixas, gastos: viewGastos, cartoes: viewCartoes, investimentos: viewInvest, dividas: viewDividas, negativados: viewNegativados, prioridades: viewPrioridades, metas: viewMetas, assistente: viewAssistente, ajustes: viewAjustes };
 const TITLES = Object.fromEntries(NAV.concat(NAV_SIMPLE).filter(n => n.v).map(n => [n.v, n.t]));
-const MONTHLESS = ['negativados', 'prioridades', 'metas', 'ajustes'];
+const MONTHLESS = ['assistente', 'negativados', 'prioridades', 'metas', 'ajustes'];
 
 function manageCategories() {
   const draw = sh => {
@@ -1581,6 +1896,7 @@ function render() {
   const tabs = [['inicio', 'home', 'Início'], ['contas', 'receipt', 'Contas'], null, ['cartoes', 'card', 'Cartões']];
   $('#bnav').innerHTML = tabs.map(t => t ? `<a href="#${t[0]}" class="${S.view === t[0] ? 'active' : ''}">${ic(t[1])}<span>${t[2]}</span></a>` : `<button data-act="quick" aria-label="Novo lançamento"><span class="fab">${ic('plus')}</span></button>`).join('') + `<button data-act="menu" class="${['inicio', 'contas', 'cartoes'].includes(S.view) ? '' : 'active'}" style="${['inicio', 'contas', 'cartoes'].includes(S.view) ? '' : 'color:var(--primary)'}">${ic('grid')}<span>Mais</span></button>`;
   }
+  if (S.view === 'assistente' && active && active.matches && active.matches('.chat-input [data-chatq]')) { const el = $('.chat-input [data-chatq]'); if (el && !el.disabled) el.focus(); }
   if (qKey) { const el = document.querySelector(`[data-q="${qKey}"]`); if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch {} } }
   window.scrollTo(0, scrollY);
 }
@@ -1609,9 +1925,19 @@ window.addEventListener('hashchange', route);
 
 // ---------- eventos ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-act],[data-sedit],[data-detail],[data-edit],[data-goto],[data-seg],[data-cexp],[data-openpay],[data-famt],[data-qamt],[data-theme-set]');
+  const t = e.target.closest('[data-aiact],[data-aisug],[data-act],[data-sedit],[data-detail],[data-edit],[data-goto],[data-seg],[data-cexp],[data-openpay],[data-famt],[data-qamt],[data-theme-set]');
   if (!t || !S.ready) return;
   if (t.matches('input')) return;
+  if (t.dataset.aisug) return aiSend(t.dataset.aisug);
+  if (t.dataset.aiact) {
+    const [what, mi, ai] = t.dataset.aiact.split('|'), m = chatLog()[+mi]; if (!m) return;
+    if (what === 'all') return aiConfirm((m.actions || []).filter(a => a.state === 'pending'));
+    const a = (m.actions || [])[+ai]; if (!a || a.state !== 'pending') return;
+    if (what === 'ok') return aiConfirm([a]);
+    if (what === 'edit') return aiEdit(a);
+    if (what === 'no') { a.state = 'discarded'; return render(); }
+    return;
+  }
   if (t.dataset.qamt) { const [k, id, mm, yy] = t.dataset.qamt.split('|'); if (t.closest('[data-dsheet]')) closeSheet(); return mm != null && mm !== '' ? quickAmount(k, id, +mm, +yy) : quickAmount(k, id); }
   if (t.dataset.sedit) { const [k, id] = t.dataset.sedit.split('|'); return simpleForm(k === 'earnings' ? 'in' : 'out', id); }
   if (t.dataset.detail) return details(t.dataset.detail);
@@ -1639,6 +1965,8 @@ document.addEventListener('click', async e => {
     case 'mode': return setMode(t.dataset.v === 'simple');
     case 'menu': return openMenu();
     case 'new': return editItem(t.dataset.key);
+    case 'aiclear': S.ui.chat = []; return render();
+    case 'aion': D().settings.aiOff = false; commit(['settings']); return;
     case 'goalnew': return editGoal(null, t.dataset.preset ? GOAL_PRESETS[+t.dataset.preset] : {});
     case 'goaledit': return editGoal(t.dataset.id);
     case 'goalsave': return saveToGoal(t.dataset.id);
@@ -1677,16 +2005,19 @@ document.addEventListener('change', e => {
     else { const raw = String(t.value).trim(), neg = raw.startsWith('-'), v = parseMoney(raw.replace('-', '')); cfg.initial = Number.isFinite(v) ? (neg ? -v : v) : 0; }
     D().settings.carry = cfg; commit(['settings']); return;
   }
+  if (t.dataset.aitoggle !== undefined) { D().settings.aiOff = !t.checked; commit(['settings']); toast(t.checked ? 'Assistente ligado' : 'Assistente desligado'); return; }
   if (t.dataset.pctcards !== undefined) { D().settings.percentCards = t.checked; commit(['settings']); toast(t.checked ? 'Cartão incluído no % comprometido' : 'Cartão removido do % comprometido'); return; }
   if (t.dataset.vis) { D().settings.visibleCards[t.dataset.vis] = t.checked; commit(['settings']); return; }
   if (t.dataset.import !== undefined && t.files && t.files[0]) { importFile(t.files[0]); t.value = ''; }
 });
 document.addEventListener('input', e => {
   const t = e.target;
+  if (t.dataset.chatq !== undefined) { S.ui.chatDraft = t.value; return; }
   if (t.dataset.q) { S.ui[t.dataset.q] = t.value; render(); }
 });
 document.addEventListener('submit', e => {
   const f = e.target;
+  if (f.matches('[data-chatform]')) { e.preventDefault(); const i = f.querySelector('[data-chatq]'); const v = i ? i.value : ''; if (i) i.value = ''; aiSend(v); return; }
   if (!f.matches('[data-quickform]')) return;
   e.preventDefault();
   const fields = [{ k: 'description', type: 'text', req: 1 }, { k: 'amount', type: 'money', req: 1 }, { k: 'date', type: 'date', req: 1 }, { k: 'category', type: 'select', req: 1 }, { k: '_paid', type: 'toggle' }];

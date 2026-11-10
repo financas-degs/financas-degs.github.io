@@ -284,6 +284,15 @@ const fixedActive = (c, m, y) => {
   if (c.endDate) { const [ey, em] = parts(c.endDate); if (y > ey || (y === ey && m > em - 1)) return false; }
   return true;
 };
+// conta fixa com fim: parcela do mês e quantas já foram pagas
+function fixedInst(c, m, y) {
+  if (!c || !c.startDate || !c.endDate) return null;
+  const [sy, sm] = parts(c.startDate), [ey, em] = parts(c.endDate);
+  const s0 = sy * 12 + sm - 1, e0 = ey * 12 + em - 1; if (!(e0 >= s0)) return null;
+  let paid = 0; for (let k = s0; k <= e0; k++) if (isPaid('fixed', c.id, k % 12, Math.floor(k / 12))) paid++;
+  const cur = m == null ? null : y * 12 + m - s0 + 1;
+  return { total: e0 - s0 + 1, paid, cur: cur != null && cur >= 1 && cur <= e0 - s0 + 1 ? cur : null };
+}
 const fixedAmt = (c, m, y) => { const o = c.amounts && c.amounts[monthStr(m, y)]; return o != null ? num(o) : num(c.amount); };
 const fixedOver = (c, m, y) => !!(c.amounts && c.amounts[monthStr(m, y)] != null);
 const invoiceId = (cardId, m, y) => `inv_${cardId}_${m}_${y}`;
@@ -312,7 +321,8 @@ function calc(m, y) {
   d.fixedCosts.forEach(c => {
     if (!fixedActive(c, m, y)) return;
     fixedTotal += fixedAmt(c, m, y);
-    payables.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: fixedOver(c, m, y) ? 'Fixa · valor do mês' : 'Fixa', amount: fixedAmt(c, m, y), day: num(c.dueDay) || 1, color: safeColor(c.color, '#3b82f6'), isPaid: isPaid('fixed', c.id, m, y), tM: m, tY: y });
+    const fi = fixedInst(c, m, y);
+    payables.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: (fi && fi.cur ? `Parcela ${fi.cur}/${fi.total} · ${fi.paid}/${fi.total} pagas` : 'Fixa') + (fixedOver(c, m, y) ? ' · valor do mês' : ''), amount: fixedAmt(c, m, y), day: num(c.dueDay) || 1, color: safeColor(c.color, '#3b82f6'), isPaid: isPaid('fixed', c.id, m, y), tM: m, tY: y });
   });
   const varMonth = d.variableExpenses.filter(v => inMonth(v.date, m, y));
   const catTotals = {};
@@ -370,7 +380,7 @@ function calc(m, y) {
     const t = new Date(y, m - i, 1), om = t.getMonth(), oy = t.getFullYear();
     d.fixedCosts.forEach(c => {
       if (!fixedActive(c, om, oy) || isPaid('fixed', c.id, om, oy)) return;
-      overdue.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: `Atrasada · ${MSHORT[om]}/${oy}${fixedOver(c, om, oy) ? ' · valor ajustado' : ''}`, amount: fixedAmt(c, om, oy), day: num(c.dueDay) || 1, color: '#ef4444', isPaid: false, tM: om, tY: oy, overdue: true });
+      overdue.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: `Atrasada · ${MSHORT[om]}/${oy}${(fi => fi && fi.cur ? ` · parcela ${fi.cur}/${fi.total}` : '')(fixedInst(c, om, oy))}${fixedOver(c, om, oy) ? ' · valor ajustado' : ''}`, amount: fixedAmt(c, om, oy), day: num(c.dueDay) || 1, color: '#ef4444', isPaid: false, tM: om, tY: oy, overdue: true });
     });
   }
   overdue.sort((a, b) => (a.tY - b.tY) || (a.tM - b.tM) || (a.day - b.day));
@@ -642,7 +652,7 @@ function editItem(key, id) {
       commit(keysTouched); toast('Item excluído');
     },
     deleteLabel: key === 'cards' ? 'Excluir cartão' : 'Excluir',
-    extra: key === 'cards' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Excluir o cartão também apaga as compras lançadas nele.</p>` : (key === 'fixedCosts' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Dica: para parar de pagar uma conta sem perder o histórico, preencha <b>Termina em</b> em vez de excluir.</p>` : (key === 'priorities' && !isNew ? `<button type="button" class="btn sm" style="margin-top:14px" data-act="pri2goal" data-id="${esc(item.id)}">${ic('target')} Transformar em meta</button><p class="muted" style="font-size:12.5px;margin:8px 0 0">Vira uma meta com valor e prazo, e o app calcula quanto guardar por mês.</p>` : ''))
+    extra: key === 'cards' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Excluir o cartão também apaga as compras lançadas nele.</p>` : (key === 'fixedCosts' && !isNew ? `${(fi => fi ? `<p style="font-size:13px;margin:14px 0 0"><b>${fi.paid} de ${fi.total} parcelas pagas</b>${fi.paid < fi.total ? ` · faltam ${fi.total - fi.paid}` : ' · tudo pago 🎉'}</p>` : '')(fixedInst(item))}<p class="muted" style="font-size:12.5px;margin:14px 0 0">Dica: para parar de pagar uma conta sem perder o histórico, preencha <b>Termina em</b> em vez de excluir.</p>` : (key === 'priorities' && !isNew ? `<button type="button" class="btn sm" style="margin-top:14px" data-act="pri2goal" data-id="${esc(item.id)}">${ic('target')} Transformar em meta</button><p class="muted" style="font-size:12.5px;margin:8px 0 0">Vira uma meta com valor e prazo, e o app calcula quanto guardar por mês.</p>` : ''))
   });
 }
 
@@ -1008,11 +1018,11 @@ function viewFixas() {
   const c = C();
   const active = D().fixedCosts.filter(x => fixedActive(x, S.m, S.y)).sort((a, b) => num(a.dueDay) - num(b.dueDay));
   const inactive = D().fixedCosts.filter(x => !fixedActive(x, S.m, S.y));
-  const row = x => { const paid = isPaid('fixed', x.id, S.m, S.y); return `<div class="row${paid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="fixed" data-id="${esc(x.id)}" data-tm="${S.m}" data-ty="${S.y}"${paid ? ' checked' : ''} aria-label="Marcar como pago"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow" data-edit="fixedCosts" data-id="${esc(x.id)}" style="cursor:pointer"><div class="t">${esc(x.name)}</div><div class="s">Vence dia ${esc(x.dueDay)} · desde ${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}${fixedOver(x, S.m, S.y) ? ' · valor do mês' : ''}</div></div>${amtBtn(`fixedCosts|${x.id}|${S.m}|${S.y}`, fmt(fixedAmt(x, S.m, S.y)))}</div>`; };
+  const row = x => { const paid = isPaid('fixed', x.id, S.m, S.y); return `<div class="row${paid ? ' paid' : ''}"><input type="checkbox" class="check" data-pay="fixed" data-id="${esc(x.id)}" data-tm="${S.m}" data-ty="${S.y}"${paid ? ' checked' : ''} aria-label="Marcar como pago"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow" data-edit="fixedCosts" data-id="${esc(x.id)}" style="cursor:pointer"><div class="t">${esc(x.name)}</div><div class="s">Vence dia ${esc(x.dueDay)} · ${(fi => fi && fi.cur ? `parcela ${fi.cur}/${fi.total} · até ${fmtDate(x.endDate)}` : `desde ${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}`)(fixedInst(x, S.m, S.y))}${fixedOver(x, S.m, S.y) ? ' · valor do mês' : ''}</div>${(fi => fi ? `<div style="display:flex;align-items:center;gap:10px;margin-top:7px"><div class="progress" style="flex:1"><i style="width:${Math.min(100, fi.paid / fi.total * 100)}%;background:${safeColor(x.color)}"></i></div><span class="muted" style="font-size:12px;white-space:nowrap">${fi.paid}/${fi.total} pagas</span></div>` : '')(fixedInst(x, S.m, S.y))}</div>${amtBtn(`fixedCosts|${x.id}|${S.m}|${S.y}`, fmt(fixedAmt(x, S.m, S.y)))}</div>`; };
   const paidV = active.filter(x => isPaid('fixed', x.id, S.m, S.y)).reduce((s, x) => s + fixedAmt(x, S.m, S.y), 0);
   return `<div class="stats"><div class="card stat"><span>Total fixo do mês</span><b class="num">${fmt(c.fixedTotal)}</b></div><div class="card stat"><span>Pago</span><b class="num pos">${fmt(paidV)}</b></div><div class="card stat"><span>% da renda</span><b class="num">${c.percent.toFixed(1)}%</b></div></div>
   <div class="grid">${listCard(`Contas de ${MONTHS[S.m].toLowerCase()}`, 'Toque no nome para editar', active.map(row), 'fixedCosts', 'Nova conta', 'repeat', 'Nenhuma conta fixa ativa neste mês.')}
-  ${inactive.length ? `<div class="card"><div class="card-head"><h3>Fora deste mês</h3><span class="sub">Ainda não começaram ou já terminaram</span></div><div class="card-body"><div class="list">${inactive.map(x => `<div class="row click" data-edit="fixedCosts" data-id="${esc(x.id)}"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}</div></div><div class="amt num muted">${fmt(x.amount)}</div></div>`).join('')}</div></div></div>` : ''}</div>`;
+  ${inactive.length ? `<div class="card"><div class="card-head"><h3>Fora deste mês</h3><span class="sub">Ainda não começaram ou já terminaram</span></div><div class="card-body"><div class="list">${inactive.map(x => `<div class="row click" data-edit="fixedCosts" data-id="${esc(x.id)}"><span class="dot-c" style="background:${safeColor(x.color)}"></span><div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${fmtDate(x.startDate)}${x.endDate ? ' até ' + fmtDate(x.endDate) : ''}${(fi => fi ? ` · ${fi.paid}/${fi.total} pagas` : '')(fixedInst(x))}</div></div><div class="amt num muted">${fmt(x.amount)}</div></div>`).join('')}</div></div></div>` : ''}</div>`;
 }
 function viewGastos() {
   const c = C();
@@ -1135,7 +1145,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.12.6</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.13</p></div>`;
 }
 
 // ---------- metas (objetivos) ----------
@@ -1440,6 +1450,7 @@ async function aiCall(text) {
       last = last && aiStatus(last) === 429 && st !== 429 ? last : e;
       if (/genai config not found|has been deactivated/i.test(msg)) throw e; // problema do projeto, não do modelo
       // modelo inexistente, sem cota gratuita ou que não aceita o pedido: tenta o próximo
+      if (st === 500 || st === 503 || /high demand|overloaded|UNAVAILABLE/i.test(msg)) { await new Promise(r => setTimeout(r, 600)); continue; }
       if (st === 404 || st === 429 || st === 400 || /not found|not supported|no longer available|quota|RESOURCE_EXHAUSTED/i.test(msg)) continue;
       throw e;
     }
@@ -1464,6 +1475,7 @@ function aiErrorText(e) {
   if (st === 429 || /quota|RESOURCE_EXHAUSTED|Too Many Requests/i.test(msg)) return 'O limite gratuito do assistente foi atingido por agora. Espere um minutinho e tente de novo. (Se acontecer muito, pode ser o limite do dia.)' + (aiDetail(e) ? `\n\nDetalhe: ${aiDetail(e)}` : '');
   if (st === 401 || /app.?check|appcheck|UNAUTHENTICATED/i.test(msg)) return (window.APP_CHECK_KEY || window.APP_CHECK_ENTERPRISE_KEY) ? 'A proteção do app (App Check) recusou o pedido. Confira se o domínio financas-degs.github.io está na chave do reCAPTCHA e se o App Check foi registrado no Firebase.' + aiCheckInfo(e) : 'O Firebase está exigindo a proteção do app (App Check), que ainda não foi configurada aqui. Me peça para configurar: é gratuito e leva uns 10 minutos.';
   if (st === 403 || /PERMISSION_DENIED|API key/i.test(msg)) return 'O Firebase recusou o pedido (permissão). Confira se o "AI Logic" está ativado com a "Gemini Developer API".' + (aiDetail(e) ? `\n\nDetalhe: ${aiDetail(e)}` : '');
+  if (st === 500 || st === 503 || /high demand|overloaded|UNAVAILABLE/i.test(msg)) return 'A IA do Google está sobrecarregada neste momento (isso é do lado deles e costuma passar rápido). Tente de novo em alguns minutos.';
   if (e instanceof SyntaxError) return 'Não entendi bem a resposta da IA. Pode repetir com outras palavras?';
   return 'Não consegui falar com a IA agora. Tente de novo em instantes.' + (aiDetail(e) ? `\n\nDetalhe${st ? ' (' + st + ')' : ''}: ${aiDetail(e)}` : '');
 }

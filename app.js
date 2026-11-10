@@ -1135,7 +1135,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.12.4</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.12.5</p></div>`;
 }
 
 // ---------- metas (objetivos) ----------
@@ -1419,7 +1419,8 @@ async function aiCall(text) {
     const [a, m] = await Promise.all([import(base + 'firebase-app.js'), import(base + 'firebase-ai.js')]);
     const app = a.getApps().find(x => x.name === 'assistente') || a.initializeApp(window.FIREBASE_CONFIG, 'assistente');
     // proteção contra uso indevido (App Check com reCAPTCHA v3, gratuito). A chave do site vai em firebase-config.js
-    if (window.APP_CHECK_KEY) { try { const ac = await import(base + 'firebase-app-check.js'); const chk = ac.initializeAppCheck(app, { provider: new ac.ReCaptchaV3Provider(window.APP_CHECK_KEY), isTokenAutoRefreshEnabled: true }); AI.check = chk; AI.ac = ac; } catch (e) { console.warn('App Check', e); } }
+    // APP_CHECK_ENTERPRISE_KEY = Fraud Defense (reCAPTCHA Enterprise); APP_CHECK_KEY = reCAPTCHA v3 clássico (descontinuado)
+    if (window.APP_CHECK_ENTERPRISE_KEY || window.APP_CHECK_KEY) { try { const ac = await import(base + 'firebase-app-check.js'); const provider = window.APP_CHECK_ENTERPRISE_KEY ? new ac.ReCaptchaEnterpriseProvider(window.APP_CHECK_ENTERPRISE_KEY) : new ac.ReCaptchaV3Provider(window.APP_CHECK_KEY); const chk = ac.initializeAppCheck(app, { provider, isTokenAutoRefreshEnabled: true }); AI.check = chk; AI.ac = ac; } catch (e) { console.warn('App Check', e); } }
     AI.m = m; AI.ai = m.getAI(app, { backend: new m.GoogleAIBackend() });
   }
   if (AI.check) { aiCheckErr = ''; try { const r = await AI.ac.getToken(AI.check); if (r && r.error) aiCheckErr = String(r.error.message || r.error).slice(0, 220); } catch (e) { aiCheckErr = String(e && e.message || e).slice(0, 220); } }
@@ -1461,7 +1462,7 @@ function aiErrorText(e) {
   if (navigator.onLine === false) return 'Parece que você está sem internet. Tente de novo quando conectar.';
   if (code === 'AI/api-not-enabled' || code === 'api-not-enabled' || /api-not-enabled|has not been used|is disabled|SERVICE_DISABLED/i.test(msg)) return 'O assistente ainda não foi ativado no Firebase. No console do Firebase, abra "AI Logic", toque em "Começar" e escolha "Gemini Developer API". Depois é só tentar de novo.';
   if (st === 429 || /quota|RESOURCE_EXHAUSTED|Too Many Requests/i.test(msg)) return 'O limite gratuito do assistente foi atingido por agora. Espere um minutinho e tente de novo. (Se acontecer muito, pode ser o limite do dia.)' + (aiDetail(e) ? `\n\nDetalhe: ${aiDetail(e)}` : '');
-  if (st === 401 || /app.?check|appcheck|UNAUTHENTICATED/i.test(msg)) return window.APP_CHECK_KEY ? 'A proteção do app (App Check) recusou o pedido. Confira se o domínio financas-degs.github.io está na chave do reCAPTCHA e se o App Check foi registrado no Firebase.' + aiCheckInfo(e) : 'O Firebase está exigindo a proteção do app (App Check), que ainda não foi configurada aqui. Me peça para configurar: é gratuito e leva uns 10 minutos.';
+  if (st === 401 || /app.?check|appcheck|UNAUTHENTICATED/i.test(msg)) return (window.APP_CHECK_KEY || window.APP_CHECK_ENTERPRISE_KEY) ? 'A proteção do app (App Check) recusou o pedido. Confira se o domínio financas-degs.github.io está na chave do reCAPTCHA e se o App Check foi registrado no Firebase.' + aiCheckInfo(e) : 'O Firebase está exigindo a proteção do app (App Check), que ainda não foi configurada aqui. Me peça para configurar: é gratuito e leva uns 10 minutos.';
   if (st === 403 || /PERMISSION_DENIED|API key/i.test(msg)) return 'O Firebase recusou o pedido (permissão). Confira se o "AI Logic" está ativado com a "Gemini Developer API".' + (aiDetail(e) ? `\n\nDetalhe: ${aiDetail(e)}` : '');
   if (e instanceof SyntaxError) return 'Não entendi bem a resposta da IA. Pode repetir com outras palavras?';
   return 'Não consegui falar com a IA agora. Tente de novo em instantes.' + (aiDetail(e) ? `\n\nDetalhe${st ? ' (' + st + ')' : ''}: ${aiDetail(e)}` : '');

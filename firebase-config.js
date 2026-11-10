@@ -8,3 +8,6 @@ window.FIREBASE_CONFIG = {
   messagingSenderId: "515001863195",
   appId: "1:515001863195:web:5cd8774d46bc516a927cbe"
 };
+
+// Chave do site do reCAPTCHA v3 (pública) — usada pelo App Check do assistente com IA
+window.APP_CHECK_KEY = '6LfnzxkuAAAAACAn2c-i3yZBCAxxce2EBxZV0lqh';

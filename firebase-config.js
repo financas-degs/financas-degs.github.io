@@ -10,4 +10,4 @@ window.FIREBASE_CONFIG = {
 };
 
 // Chave do site do Fraud Defense / reCAPTCHA Enterprise (pública) — usada pelo App Check do assistente com IA
-window.APP_CHECK_ENTERPRISE_KEY = '6LfnzxkuAAAAACuirmfVCNXCmWS_NBKbq5fo6cbZ';
+window.APP_CHECK_ENTERPRISE_KEY = '6LfnzxkuAAAAACAn2c-i3yZBCAxxce2EBxZV0lqh';

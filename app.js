@@ -138,7 +138,6 @@ const S = {
 const VIEWS = ['simples','inicio','assistente','contas','entradas','fixas','gastos','cartoes','investimentos','metas','dividas','negativados','prioridades','ajustes'];
 const NAV = [
   { v: 'inicio', t: 'Início', i: 'home' },
-  { v: 'assistente', t: 'Assistente', i: 'sparkle' },
   { v: 'contas', t: 'Contas a pagar', i: 'receipt' },
   { sep: 'Lançamentos' },
   { v: 'entradas', t: 'Entradas', i: 'down' },
@@ -158,7 +157,7 @@ const D = () => S.data;
 // modo simplificado: só entradas e saídas, dia a dia (usa as mesmas listas do modo completo)
 const isSimple = () => !!(D().settings && D().settings.simple);
 const percentWithCards = () => !(D().settings && D().settings.percentCards === false);
-const NAV_SIMPLE = [{ v: 'simples', t: 'Meu caixa', i: 'home' }, { v: 'assistente', t: 'Assistente', i: 'sparkle' }, { sep: 'Conta' }, { v: 'ajustes', t: 'Ajustes', i: 'sliders' }];
+const NAV_SIMPLE = [{ v: 'simples', t: 'Meu caixa', i: 'home' }, { sep: 'Conta' }, { v: 'ajustes', t: 'Ajustes', i: 'sliders' }];
 const SIMPLE_VIEWS = ['simples', 'assistente', 'ajustes'];
 const navList = () => isSimple() ? NAV_SIMPLE : NAV;
 function fixView() {
@@ -539,7 +538,7 @@ function readFields(root, fields) {
   if (!ok) { const e = root.querySelector('.field.err input, .field.err select'); e && e.focus(); toast('Preencha os campos destacados.', true); }
   return ok ? out : null;
 }
-function openForm({ title, fields, values = {}, onSave, onDelete, deleteLabel = 'Excluir', extra = '' }) {
+function openForm({ title, fields, values = {}, onSave, onDelete, deleteLabel = 'Excluir', extra = '', confirmDelete = true }) {
   const { el, close } = openSheet({
     title,
     body: `<form class="fields" novalidate>${fields.map(f => fieldHTML(f, values[f.k])).join('')}</form>${extra}`,
@@ -550,7 +549,7 @@ function openForm({ title, fields, values = {}, onSave, onDelete, deleteLabel = 
   el.querySelector('[data-cancel]').onclick = close;
   el.querySelector('form').onsubmit = e => { e.preventDefault(); save(); };
   el.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } }));
-  if (onDelete) el.querySelector('[data-del]').onclick = async () => { if (await ask('Excluir item?', 'Essa ação não pode ser desfeita.', 'Excluir', true)) { onDelete(); close(); } };
+  if (onDelete) el.querySelector('[data-del]').onclick = async () => { if (!confirmDelete || await ask('Excluir item?', 'Essa ação não pode ser desfeita.', 'Excluir', true)) { close(); onDelete(); } };
   return el;
 }
 const defaultDate = () => { const t = new Date(); if (t.getMonth() === S.m && t.getFullYear() === S.y) return todayStr(); const last = new Date(S.y, S.m + 1, 0).getDate(); return `${S.y}-${pad(S.m + 1)}-${pad(Math.min(t.getDate(), last))}`; };
@@ -645,12 +644,8 @@ function editItem(key, id) {
       commit(keysTouched);
       toast(isNew ? 'Adicionado' : 'Alterações salvas');
     },
-    onDelete: isNew ? null : () => {
-      D()[key] = list.filter(x => x !== item);
-      if (key === 'variableExpenses') { D().payments = D().payments.filter(p => !(p.type === 'variable' && String(p.originalId) === String(item.id))); keysTouched.push('payments'); }
-      if (key === 'cards') { D().cardExpenses = D().cardExpenses.filter(e => String(e.cardId) !== String(item.id)); keysTouched.push('cardExpenses'); }
-      commit(keysTouched); toast('Item excluído');
-    },
+    onDelete: isNew ? null : () => quickDelete(key, item, key === 'cards' ? 'Cartão excluído' : 'Excluído'),
+    confirmDelete: key === 'cards',
     deleteLabel: key === 'cards' ? 'Excluir cartão' : 'Excluir',
     extra: key === 'cards' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Excluir o cartão também apaga as compras lançadas nele.</p>` : (key === 'fixedCosts' && !isNew ? `${(fi => fi ? `<p style="font-size:13px;margin:14px 0 0"><b>${fi.paid} de ${fi.total} parcelas pagas</b>${fi.paid < fi.total ? ` · faltam ${fi.total - fi.paid}` : ' · tudo pago 🎉'}</p>` : '')(fixedInst(item))}<p class="muted" style="font-size:12.5px;margin:14px 0 0">Dica: para parar de pagar uma conta sem perder o histórico, preencha <b>Termina em</b> em vez de excluir.</p>` : (key === 'priorities' && !isNew ? `<button type="button" class="btn sm" style="margin-top:14px" data-act="pri2goal" data-id="${esc(item.id)}">${ic('target')} Transformar em meta</button><p class="muted" style="font-size:12.5px;margin:8px 0 0">Vira uma meta com valor e prazo, e o app calcula quanto guardar por mês.</p>` : ''))
   });
@@ -672,12 +667,29 @@ function editFixedMonth(id, m, y, lkey = 'fixedCosts') {
       if (Math.abs(num(v.amount) - num(c.amount)) < 0.005) delete c.amounts[key]; else c.amounts[key] = num(v.amount);
       if (!Object.keys(c.amounts).length) delete c.amounts;
       commit([lkey]); toast(`Valor de ${MONTHS[m].toLowerCase()} atualizado`);
-    }
+    },
+    onDelete: () => quickDelete(lkey, c, inc ? 'Renda fixa excluída' : 'Conta excluída'), deleteLabel: inc ? 'Excluir renda' : 'Excluir conta', confirmDelete: false
   });
   const r = el.querySelector('[data-fm-reset]');
   if (r) r.onclick = () => { delete c.amounts[key]; if (!Object.keys(c.amounts).length) delete c.amounts; commit([lkey]); closeSheet(); toast('Voltou ao valor padrão'); };
   el.querySelector('[data-fm-default]').onclick = () => { closeSheet(); editItem(lkey, c.id); };
   focusAmount(el);
+}
+
+// ---------- excluir com "Desfazer" ----------
+function removeItem(key, item) {
+  const keys = [key];
+  D()[key] = (D()[key] || []).filter(x => x !== item);
+  if (key === 'variableExpenses') { D().payments = D().payments.filter(p => !(p.type === 'variable' && String(p.originalId) === String(item.id))); keys.push('payments'); }
+  if (key === 'cards') { D().cardExpenses = D().cardExpenses.filter(e => String(e.cardId) !== String(item.id)); keys.push('cardExpenses'); }
+  return keys;
+}
+function quickDelete(key, item, msg = 'Excluído') {
+  const snapKeys = [key, 'payments', 'cardExpenses'];
+  const snap = clone(Object.fromEntries(snapKeys.map(k => [k, D()[k]])));
+  const keys = removeItem(key, item);
+  commit(keys);
+  toast(msg, false, { label: 'Desfazer', fn: () => { Object.assign(S.data, snap); commit(snapKeys); toast('Restaurado'); } });
 }
 
 // ---------- edição rápida: tocar no valor ----------
@@ -702,7 +714,8 @@ function quickAmount(key, id, m = S.m, y = S.y) {
     fields: [{ k: 'v', label: labels[key] || 'Valor', type: 'money', req: 1, full: 1, hint: isDebt && n > 1 ? `Dividido em ${n} parcelas (hoje ${fmt(cur / n)} cada)` : '' }],
     values: { v: cur },
     extra: `<button type="button" class="btn ghost sm" style="margin-top:12px" data-qa-full>${ic('pencil')} Editar tudo (nome, data…)</button>`,
-    onSave: v => { it[field] = num(v.v); commit([key]); toast('Valor atualizado'); }
+    onSave: v => { it[field] = num(v.v); commit([key]); toast('Valor atualizado'); },
+    onDelete: () => quickDelete(key, it), confirmDelete: false
   });
   el.querySelector('[data-qa-full]').onclick = () => { closeSheet(); fullEdit(key, id); };
   focusAmount(el);
@@ -744,7 +757,7 @@ function editCardExpense(id) {
     title: 'Compra no cartão', fields, values: e,
     extra: `<p class="muted" style="font-size:13px;margin:14px 0 0">Parcela ${esc(e.installmentLabel || '1/1')} · fatura de ${fmtDate(e.date)}${e.purchaseDate ? ` · comprado em ${fmtDate(e.purchaseDate)}` : ''}</p>${group.length > 1 ? `<button class="btn danger sm" style="margin-top:12px" data-delall>${ic('trash')} Excluir a compra inteira (${group.length} parcelas)</button>` : ''}`,
     onSave: v => { Object.assign(e, v); if (group.length > 1) group.forEach(g => g.description = v.description); commit(['cardExpenses']); toast('Alterações salvas'); },
-    onDelete: () => { D().cardExpenses = D().cardExpenses.filter(x => x !== e); commit(['cardExpenses']); toast('Parcela excluída'); },
+    onDelete: () => quickDelete('cardExpenses', e, group.length > 1 ? 'Parcela excluída' : 'Compra excluída'), confirmDelete: false,
     deleteLabel: group.length > 1 ? 'Excluir só esta parcela' : 'Excluir'
   });
   const b = el.querySelector('[data-delall]');
@@ -1145,7 +1158,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.13</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.14</p></div>`;
 }
 
 // ---------- metas (objetivos) ----------
@@ -1617,7 +1630,8 @@ async function aiSend(text) {
   S.ui.chatDraft = '';
   chatLog().push({ role: 'user', text });
   AI.busy = true;
-  if (S.view !== 'assistente') go('assistente'); else render();
+  S.ui.chatOpen = true; S.ui.chatJump = true;
+  renderChatDock(); chatScrollEnd(true);
   let msg;
   try {
     const out = await aiCall(text) || {};
@@ -1628,8 +1642,10 @@ async function aiSend(text) {
   } catch (e) { console.error(e); msg = { role: 'bot', text: aiErrorText(e), error: true }; }
   AI.busy = false;
   chatLog().push(msg);
-  if (S.ready) render();
-  aiScroll();
+  if (!S.ui.chatOpen) S.ui.chatUnread = true;
+  else S.ui.chatJump = true;
+  renderChatDock();
+  if (!S.ui.chatOpen) toast('O assistente respondeu 💬', false, { label: 'Ver', fn: () => chatOpen(true) });
 }
 function aiScroll() { requestAnimationFrame(() => { const end = document.getElementById('chatend'); if (end) end.scrollIntoView({ block: 'end', behavior: 'smooth' }); }); }
 const aiText = s => esc(s).replace(/\n/g, '<br>');
@@ -1668,6 +1684,62 @@ function viewAssistente() {
   return h;
 }
 
+
+// ---------- balão do assistente (abre/fecha; avisa com bolinha quando a resposta chega) ----------
+function chatBodyHTML() {
+  const log = chatLog();
+  let h = '';
+  if (!log.length) h += `<div class="chat-intro"><div class="ai-ava">${ic('sparkle')}</div><h2>Oi! Como posso ajudar?</h2><p class="muted">Me conte o que entrou e o que saiu do jeito que você fala. Eu preparo o lançamento e você confirma. Pode fechar esta janela enquanto eu penso: quando a resposta chegar, aparece uma bolinha vermelha no balão.</p>
+    <div class="chat-sugs">${aiSuggestions().map(x => `<button class="chip-btn" data-aisug="${esc(x)}">${esc(x)}</button>`).join('')}</div></div>`;
+  log.forEach((m, mi) => {
+    if (m.role === 'user') h += `<div class="msg me"><div class="bubble">${aiText(m.text)}</div></div>`;
+    else {
+      const pend = (m.actions || []).filter(a => a.state === 'pending').length;
+      h += `<div class="msg bot"><span class="ai-ava sm">${ic('sparkle')}</span><div class="bot-col"><div class="bubble${m.error ? ' err' : ''}">${aiText(m.text)}</div>
+        ${(m.actions || []).map((a, ai) => aiActionHTML(a, mi, ai)).join('')}
+        ${pend > 1 ? `<button class="btn primary sm" data-aiact="all|${mi}|0">${ic('check')} Confirmar todos (${pend})</button>` : ''}
+        ${m.note ? `<p class="muted ai-note">${esc(m.note)}</p>` : ''}</div></div>`;
+    }
+  });
+  if (AI.busy) h += `<div class="msg bot"><span class="ai-ava sm">${ic('sparkle')}</span><div class="bubble typing"><i></i><i></i><i></i></div></div>`;
+  return h;
+}
+function chatScrollEnd(smooth) { const b = document.getElementById('chatscroll'); if (b) b.scrollTo({ top: b.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }); }
+function renderChatDock() {
+  let fab = document.getElementById('chatfab'), panel = document.getElementById('chatpanel');
+  const show = S.ready && !!$('#content') && aiOn();
+  if (!show) { document.body.classList.remove('has-chat'); if (fab) fab.hidden = true; if (panel) panel.classList.remove('open'); return; }
+  if (!fab) {
+    document.body.insertAdjacentHTML('beforeend', `<button id="chatfab" class="chat-fab" data-act="chattoggle" aria-label="Abrir assistente"><span class="fab-ico"></span><span class="fab-dot"></span></button>
+      <section id="chatpanel" class="chat-panel" role="dialog" aria-label="Assistente">
+        <header class="chat-head"><span class="ai-ava sm">${ic('sparkle')}</span><div class="grow"><b>Assistente</b><span class="chat-status"></span></div><button class="icon-btn" data-act="aiclear" title="Limpar conversa" aria-label="Limpar conversa">${ic('trash')}</button><button class="icon-btn" data-act="chatclose" title="Fechar" aria-label="Fechar">${ic('x')}</button></header>
+        <div class="chat-scroll" id="chatscroll"><div class="chat" id="chatbody"></div></div>
+        <form class="chat-input" data-chatform><input data-chatq autocomplete="off" enterkeyhint="send" placeholder="Escreva aqui…" aria-label="Mensagem para o assistente"><button class="btn primary" type="submit" aria-label="Enviar">${ic('send')}</button></form>
+        <p class="chat-foot muted">A IA pode errar: confira antes de confirmar.</p>
+      </section>`);
+    fab = document.getElementById('chatfab'); panel = document.getElementById('chatpanel');
+  }
+  fab.hidden = false; document.body.classList.add('has-chat');
+  const open = !!S.ui.chatOpen;
+  if (open) S.ui.chatUnread = false;
+  fab.classList.toggle('busy', AI.busy);
+  fab.classList.toggle('unread', !!S.ui.chatUnread);
+  fab.classList.toggle('is-open', open);
+  fab.setAttribute('aria-label', open ? 'Fechar assistente' : S.ui.chatUnread ? 'Assistente: resposta nova' : 'Abrir assistente');
+  fab.querySelector('.fab-ico').innerHTML = ic(open ? 'x' : 'sparkle');
+  document.body.classList.toggle('chat-open', open);
+  panel.querySelector('.chat-status').textContent = AI.busy ? 'pensando…' : 'lança, corrige e responde';
+  const sc = document.getElementById('chatscroll'), atEnd = !sc.scrollHeight || sc.scrollHeight - sc.scrollTop - sc.clientHeight < 60;
+  const body = document.getElementById('chatbody'), html = chatBodyHTML();
+  if (body.__html !== html) { body.innerHTML = html; body.__html = html; if (atEnd || S.ui.chatJump) { S.ui.chatJump = false; chatScrollEnd(false); } }
+  const inp = panel.querySelector('[data-chatq]'); if (inp && inp.value !== (S.ui.chatDraft || '') && document.activeElement !== inp) inp.value = S.ui.chatDraft || '';
+  panel.querySelector('.chat-input [type=submit]').disabled = AI.busy;
+  const was = panel.classList.contains('open');
+  panel.classList.toggle('open', open);
+  if (open && !was) { S.ui.chatJump = false; requestAnimationFrame(() => chatScrollEnd(false)); if (matchMedia('(pointer: fine)').matches) setTimeout(() => inp && inp.focus(), 150); }
+}
+function chatOpen(v) { S.ui.chatOpen = v; if (v) S.ui.chatUnread = false; renderChatDock(); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.ui && S.ui.chatOpen && !document.querySelector('.sheet.show')) chatOpen(false); });
 // ---------- modo simplificado ----------
 const WDAYS = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
 function setMode(simple) {
@@ -1797,11 +1869,7 @@ function simpleForm(dir = 'in', id) {
       };
       const del = sh.querySelector('[data-del]');
       if (del) del.onclick = async () => {
-        if (!(await ask('Excluir lançamento?', `"${esc(item.description)}" de ${fmt(item.amount)} será apagado.`, 'Excluir', true))) return;
-        const key = keyOf(cur);
-        D()[key] = D()[key].filter(x => x !== item);
-        if (key === 'variableExpenses') { D().payments = D().payments.filter(p => !(p.type === 'variable' && String(p.originalId) === String(item.id))); commit([key, 'payments']); } else commit([key]);
-        close(); toast('Lançamento excluído');
+        close(); quickDelete(keyOf(cur), item, 'Lançamento excluído');
       };
     }
   });
@@ -1926,9 +1994,9 @@ function render() {
   const tabs = [['inicio', 'home', 'Início'], ['contas', 'receipt', 'Contas'], null, ['cartoes', 'card', 'Cartões']];
   $('#bnav').innerHTML = tabs.map(t => t ? `<a href="#${t[0]}" class="${S.view === t[0] ? 'active' : ''}">${ic(t[1])}<span>${t[2]}</span></a>` : `<button data-act="quick" aria-label="Novo lançamento"><span class="fab">${ic('plus')}</span></button>`).join('') + `<button data-act="menu" class="${['inicio', 'contas', 'cartoes'].includes(S.view) ? '' : 'active'}" style="${['inicio', 'contas', 'cartoes'].includes(S.view) ? '' : 'color:var(--primary)'}">${ic('grid')}<span>Mais</span></button>`;
   }
-  if (S.view === 'assistente' && active && active.matches && active.matches('.chat-input [data-chatq]')) { const el = $('.chat-input [data-chatq]'); if (el && !el.disabled) el.focus(); }
   if (qKey) { const el = document.querySelector(`[data-q="${qKey}"]`); if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch {} } }
   window.scrollTo(0, scrollY);
+  renderChatDock();
 }
 function pickMonth() {
   let y = S.y;
@@ -1948,6 +2016,7 @@ function openMenu() {
 function go(v) { if (location.hash !== '#' + v) location.hash = v; else route(); }
 function route() {
   const v = (location.hash || '').replace('#', '');
+  if (v === 'assistente') { S.ui.chatOpen = true; location.replace('#' + (isSimple() ? 'simples' : 'inicio')); return; }
   S.view = VIEWS.includes(v) ? v : (S.ready && isSimple() ? 'simples' : 'inicio');
   if (S.ready) { render(); window.scrollTo(0, 0); }
 }
@@ -1965,7 +2034,7 @@ document.addEventListener('click', async e => {
     const a = (m.actions || [])[+ai]; if (!a || a.state !== 'pending') return;
     if (what === 'ok') return aiConfirm([a]);
     if (what === 'edit') return aiEdit(a);
-    if (what === 'no') { a.state = 'discarded'; return render(); }
+    if (what === 'no') { a.state = 'discarded'; return renderChatDock(); }
     return;
   }
   if (t.dataset.qamt) { const [k, id, mm, yy] = t.dataset.qamt.split('|'); if (t.closest('[data-dsheet]')) closeSheet(); return mm != null && mm !== '' ? quickAmount(k, id, +mm, +yy) : quickAmount(k, id); }
@@ -1995,7 +2064,9 @@ document.addEventListener('click', async e => {
     case 'mode': return setMode(t.dataset.v === 'simple');
     case 'menu': return openMenu();
     case 'new': return editItem(t.dataset.key);
-    case 'aiclear': S.ui.chat = []; return render();
+    case 'aiclear': S.ui.chat = []; return renderChatDock();
+    case 'chattoggle': return chatOpen(!S.ui.chatOpen);
+    case 'chatclose': return chatOpen(false);
     case 'aion': D().settings.aiOff = false; commit(['settings']); return;
     case 'goalnew': return editGoal(null, t.dataset.preset ? GOAL_PRESETS[+t.dataset.preset] : {});
     case 'goaledit': return editGoal(t.dataset.id);

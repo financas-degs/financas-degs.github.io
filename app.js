@@ -373,13 +373,32 @@ function calc(m, y) {
   d.negatives.filter(n => n.paid && inMonth(n.paidDate, m, y)).forEach(n => outflows.push({ desc: `Quitação: ${n.description || 'Negativado'}`, sub: `Negativado · ${fmtDate(n.paidDate)}`, amount: num(n.paidAmount ?? n.amount), tone: 'red', date: n.paidDate, edit: ['negatives', n.id], q: `negatives|${n.id}` }));
   const expenses = outflows.reduce((s, x) => s + x.amount, 0);
 
-  // Vencidos: contas fixas não pagas dos 12 meses anteriores
+  // Vencidos: tudo o que não foi pago nos 12 meses anteriores (contas fixas, parcelas de dívidas, gastos não pagos e faturas)
   const overdue = [];
   for (let i = 1; i <= 12; i++) {
     const t = new Date(y, m - i, 1), om = t.getMonth(), oy = t.getFullYear();
     d.fixedCosts.forEach(c => {
       if (!fixedActive(c, om, oy) || isPaid('fixed', c.id, om, oy)) return;
       overdue.push({ type: 'fixed', id: c.id, name: c.name || 'Conta fixa', kind: `Atrasada · ${MSHORT[om]}/${oy}${(fi => fi && fi.cur ? ` · parcela ${fi.cur}/${fi.total}` : '')(fixedInst(c, om, oy))}${fixedOver(c, om, oy) ? ' · valor ajustado' : ''}`, amount: fixedAmt(c, om, oy), day: num(c.dueDay) || 1, color: '#ef4444', isPaid: false, tM: om, tY: oy, overdue: true });
+    });
+    // parcelas de dívidas não pagas
+    d.debts.forEach(debt => {
+      if (!debt.date) return;
+      const diff = monthDiff(debt.date, om, oy), n = debt.installments || 1;
+      if (diff < 0 || diff >= n || isPaid('debt_installment', debt.id, om, oy)) return;
+      overdue.push({ type: 'debt_installment', id: debt.id, name: `${debt.name || 'Dívida'} (${diff + 1}/${n})`, kind: `Atrasada · ${MSHORT[om]}/${oy} · parcela de dívida`, amount: num(debt.totalAmount) / n, day: parts(debt.date)[2] || 1, color: '#ef4444', isPaid: false, tM: om, tY: oy, overdue: true });
+    });
+    // gastos lançados como "não pago"
+    d.variableExpenses.forEach(v => {
+      if (!inMonth(v.date, om, oy) || isPaid('variable', v.id, om, oy)) return;
+      overdue.push({ type: 'variable', id: v.id, name: v.description || v.category || 'Gasto', kind: `Atrasado · ${MSHORT[om]}/${oy}${v.category ? ' · ' + v.category : ''}`, amount: num(v.amount), day: parts(v.date)[2] || 1, color: '#ef4444', isPaid: false, tM: om, tY: oy, overdue: true });
+    });
+    // faturas de cartão não pagas
+    d.cards.forEach(card => {
+      const tot = d.cardExpenses.filter(e => String(e.cardId) === String(card.id) && inMonth(e.date, om, oy)).reduce((s2, x) => s2 + num(x.amount), 0);
+      const iid = invoiceId(card.id, om, oy);
+      if (!(tot > 0) || isPaid('card_invoice', iid)) return;
+      overdue.push({ type: 'card_invoice', id: iid, name: `Fatura ${card.name}`, kind: `Atrasada · ${MSHORT[om]}/${oy} · fatura`, amount: tot, day: num(card.dueDay) || 10, color: '#ef4444', isPaid: false, tM: om, tY: oy, overdue: true });
     });
   }
   overdue.sort((a, b) => (a.tY - b.tY) || (a.tM - b.tM) || (a.day - b.day));
@@ -588,11 +607,13 @@ const SCHEMA = {
     { k: 'goalId', label: 'Para qual meta', type: 'select', full: 1, opts: () => D().goals.map(g => [g.id, `${g.emoji || '🎯'} ${g.name}`]), showIf: () => D().goals.length > 0, hint: 'Conta no progresso da meta' }] },
   debts: { title: 'dívida', fields: [
     { k: 'name', label: 'Descrição', type: 'text', req: 1, full: 1, ph: 'Ex: Empréstimo Itaú' },
-    { k: 'totalAmount', label: 'Valor total', type: 'money', req: 1 }, { k: 'installments', label: 'Nº de parcelas', type: 'int', req: 1 },
+    { k: 'installments', label: 'Nº de parcelas', type: 'int', req: 1, full: 1 },
+    { k: 'installmentAmount', label: 'Valor da parcela', type: 'money', hint: 'Preencha a parcela…' }, { k: 'totalAmount', label: 'Valor total', type: 'money', req: 1, hint: '…ou o total. O outro é calculado.' },
     { k: 'date', label: 'Data da 1ª parcela', type: 'date', req: 1, full: 1, hint: 'O dia desta data vira o dia de vencimento das parcelas' }] },
   debtsReceivable: { title: 'valor a receber', fields: [
     { k: 'name', label: 'Descrição', type: 'text', req: 1, full: 1, ph: 'Ex: Empréstimo p/ Maria' },
-    { k: 'totalAmount', label: 'Valor total', type: 'money', req: 1 }, { k: 'installments', label: 'Nº de parcelas', type: 'int', req: 1 },
+    { k: 'installments', label: 'Nº de parcelas', type: 'int', req: 1, full: 1 },
+    { k: 'installmentAmount', label: 'Valor da parcela', type: 'money', hint: 'Preencha a parcela…' }, { k: 'totalAmount', label: 'Valor total', type: 'money', req: 1, hint: '…ou o total. O outro é calculado.' },
     { k: 'date', label: 'Data da 1ª parcela', type: 'date', req: 1, full: 1 }] },
   negatives: { title: 'conta negativada', fields: [
     { k: 'description', label: 'Empresa / descrição', type: 'text', req: 1, full: 1, ph: 'Ex: Loja X' },
@@ -625,12 +646,15 @@ function editItem(key, id) {
   if (!item) return;
   const values = Object.assign({}, item);
   if (key === 'variableExpenses' && !isNew) { const [yy, mm] = parts(item.date); values._paid = isPaid('variable', item.id, mm - 1, yy); }
+  const isDebtKey = key === 'debts' || key === 'debtsReceivable';
+  if (isDebtKey && num(item.totalAmount) > 0) values.installmentAmount = Math.round(num(item.totalAmount) / (item.installments || 1) * 100) / 100;
   const keysTouched = [key];
-  openForm({
+  const formEl = openForm({
     title: (isNew ? 'Nova ' : 'Editar ') + sc.title,
     fields: sc.fields, values,
     onSave: v => {
-      const paidFlag = v._paid; delete v._paid;
+      const paidFlag = v._paid; delete v._paid; delete v.installmentAmount;
+      if (isDebtKey && !(v.installments >= 1)) v.installments = 1;
       if (key === 'negatives') { if (v.paid) { if (!v.paidDate) v.paidDate = todayStr(); if (!(v.paidAmount > 0)) v.paidAmount = v.amount; } else { v.paidAmount = null; v.paidDate = ''; } }
       if ((key === 'fixedCosts' || key === 'fixedIncome') && v.endDate && v.startDate && v.endDate < v.startDate) { toast('O mês de término deve ser depois do início.', true); return false; }
       let target;
@@ -649,6 +673,7 @@ function editItem(key, id) {
     deleteLabel: key === 'cards' ? 'Excluir cartão' : 'Excluir',
     extra: key === 'cards' && !isNew ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Excluir o cartão também apaga as compras lançadas nele.</p>` : (key === 'fixedCosts' && !isNew ? `${(fi => fi ? `<p style="font-size:13px;margin:14px 0 0"><b>${fi.paid} de ${fi.total} parcelas pagas</b>${fi.paid < fi.total ? ` · faltam ${fi.total - fi.paid}` : ' · tudo pago 🎉'}</p>` : '')(fixedInst(item))}<p class="muted" style="font-size:12.5px;margin:14px 0 0">Dica: para parar de pagar uma conta sem perder o histórico, preencha <b>Termina em</b> em vez de excluir.</p>` : (key === 'priorities' && !isNew ? `<button type="button" class="btn sm" style="margin-top:14px" data-act="pri2goal" data-id="${esc(item.id)}">${ic('target')} Transformar em meta</button><p class="muted" style="font-size:12.5px;margin:8px 0 0">Vira uma meta com valor e prazo, e o app calcula quanto guardar por mês.</p>` : ''))
   });
+  if (isDebtKey && formEl) debtFormSync(formEl);
 }
 
 // ---------- valor de uma conta fixa num mês específico ----------
@@ -674,6 +699,21 @@ function editFixedMonth(id, m, y, lkey = 'fixedCosts') {
   if (r) r.onclick = () => { delete c.amounts[key]; if (!Object.keys(c.amounts).length) delete c.amounts; commit([lkey]); closeSheet(); toast('Voltou ao valor padrão'); };
   el.querySelector('[data-fm-default]').onclick = () => { closeSheet(); editItem(lkey, c.id); };
   focusAmount(el);
+}
+
+// dívida: preencher parcela OU total, o outro é calculado
+function debtFormSync(el) {
+  const g = k => el.querySelector(`[data-k="${k}"]`);
+  const n = g('installments'), pa = g('installmentAmount'), tot = g('totalAmount'); if (!n || !pa || !tot) return;
+  let last = pa.value ? 'parcela' : 'total';
+  const cnt = () => Math.max(1, parseInt(n.value) || 1);
+  const upd = () => {
+    if (last === 'parcela') { const v = parseMoney(pa.value); tot.value = Number.isFinite(v) && v > 0 ? moneyIn(Math.round(v * cnt() * 100) / 100) : ''; }
+    else { const v = parseMoney(tot.value); pa.value = Number.isFinite(v) && v > 0 ? moneyIn(Math.round(v / cnt() * 100) / 100) : ''; }
+  };
+  pa.addEventListener('input', () => { last = 'parcela'; upd(); });
+  tot.addEventListener('input', () => { last = 'total'; upd(); });
+  n.addEventListener('input', upd);
 }
 
 // ---------- excluir com "Desfazer" ----------
@@ -850,7 +890,7 @@ function details(kind) {
     case 'fatura':
       title = 'Faturas do mês'; c.invoices.filter(i => i.items.length).forEach(i => items.push(L(`Fatura ${i.card.name}`, `Vence ${pad(i.card.dueDay)}/${pad(S.m + 1)} · ${i.paid ? 'paga' : 'em aberto'}`, i.total, i.paid ? 'pos' : ''))); total = c.cardsDue; break;
     case 'vencido':
-      title = 'Contas vencidas'; items = c.overdue.map(o => L(o.name, o.kind, o.amount, 'neg', null, `fixedCosts|${o.id}|${o.tM}|${o.tY}`)); total = c.overdueTotal; break;
+      title = 'Contas vencidas'; items = c.overdue.map(o => L(o.name, o.kind, o.amount, 'neg', null, o.type === 'fixed' ? `fixedCosts|${o.id}|${o.tM}|${o.tY}` : o.type === 'variable' ? `variableExpenses|${o.id}` : o.type === 'debt_installment' ? `debts|${o.id}` : '')); total = c.overdueTotal; break;
     case 'percent':
       title = '% da renda comprometida'; items = [L('Contas fixas do mês', '', c.fixedTotal)].concat(percentWithCards() ? [L('Faturas de cartão do mês', '', c.cardsDue)] : []).concat([L('Total de entradas', '', c.income, 'pos')]); total = null; break;
     case 'monthlyTotal': {
@@ -1158,7 +1198,7 @@ function viewAjustes() {
   <div class="card"><div class="card-head"><h3>Instalar no celular</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>Android (Chrome)</b><span>Abra o menu ⋮ e toque em "Instalar app" ou "Adicionar à tela inicial".</span></div></div><div class="set-row"><span class="ico-c tone-blue">${ic('phone')}</span><div class="grow"><b>iPhone (Safari)</b><span>Toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".</span></div></div>${deferredInstall ? `<div style="margin-top:10px"><button class="btn primary" data-act="install">${ic('download')} Instalar agora</button></div>` : ''}</div></div>
   ${!hasAnyData() ? `<div class="card"><div class="card-head"><h3>Dados de exemplo</h3></div><div class="card-body"><div class="set-row"><span class="ico-c tone-amber">${ic('sparkle')}</span><div class="grow"><b>Ver o app preenchido</b><span>Carrega lançamentos fictícios para você explorar. Dá para remover com um clique.</span></div><button class="btn" data-act="demo">Carregar exemplo</button></div></div></div>` : ''}
   <div class="card"><div class="card-head"><h3 class="neg">Zona de perigo</h3></div><div class="card-body"><div class="set-row"><div class="grow"><b>Apagar todos os dados</b><span>Remove tudo desta conta. Faça um backup antes.</span></div><button class="btn danger" data-act="wipe">${ic('trash')} Apagar tudo</button></div></div></div>
-  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.14</p></div>`;
+  <p class="muted" style="font-size:12px;text-align:center">Minhas Finanças · versão 1.15</p></div>`;
 }
 
 // ---------- metas (objetivos) ----------
@@ -1940,6 +1980,7 @@ function demoData() {
   ['f1', 'f2'].forEach(id => setPaid('fixed', id, true));
   ['v1', 'v2', 'v3'].forEach(id => setPaid('variable', id, true));
   for (let i = 1; i <= 3; i++) { const t = new Date(y, m - i, 1); setPaid('debt_installment', 'd1', true, t.getMonth(), t.getFullYear(), t.getMonth(), t.getFullYear()); }
+  for (let i = 1; i <= 3; i++) { const t = new Date(y, m - i, 1); d.cards.forEach(c => setPaid('card_invoice', invoiceId(c.id, t.getMonth(), t.getFullYear()), true, t.getMonth(), t.getFullYear(), t.getMonth(), t.getFullYear())); }
   commit(KEYS);
   toast('Dados de exemplo carregados.', false, { label: 'Remover', fn: clearDemo });
 }
